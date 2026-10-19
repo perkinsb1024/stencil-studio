@@ -1,0 +1,16 @@
+{
+  "name": "stencil-studio",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/serve.js",
+    "preview": "node scripts/serve.js dist",
+    "build": "node scripts/build.js",
+    "test": "node --test tests/geometry.test.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": ""
+}
