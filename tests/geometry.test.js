@@ -79,6 +79,43 @@ const { customizeContour, resolveTabs, nearestOnContour } = await import('../src
 const identifiedSquare = { ...square, id: 'outline-0' };
 const tab = (id, position, widthOverride = null) => ({ id, position, widthOverride });
 
+test('hidden outlines contribute no cuts, bridges or intersection warnings', () => {
+  const horizontal = { ...measureContour([{ x: 0, y: 50 }, { x: 100, y: 50 }], false), id: 'outline-0' };
+  const crossing = { ...measureContour([{ x: 100 / 3, y: 0 }, { x: 100 / 3, y: 100 }], false), id: 'outline-1' };
+  const settings = { ...options, tabCount: 2 };
+  assert.ok(generateStencil([horizontal, crossing], settings).warnings.some(w => w.includes('intersect')));
+  const result = generateStencil([horizontal, crossing], { ...settings, hiddenContours: ['outline-1'] });
+  assert.deepEqual(result, generateStencil([horizontal], settings));
+  assert.equal(insideCuts(result, { x: 100 / 3, y: 30 }), 0);
+});
+
+test('hiding a nested outline preserves custom tabs and restores identical geometry', () => {
+  const inner = { ...measureContour([{ x: 35, y: 35 }, { x: 85, y: 35 }, { x: 85, y: 85 }, { x: 35, y: 85 }], true), id: 'outline-1' };
+  const tabLayouts = { 'outline-1': [tab('tab-saved', 0.32, 6)] };
+  const settings = { ...options, tabLayouts };
+  const before = generateStencil([identifiedSquare, inner], settings);
+  const originalLayouts = structuredClone(tabLayouts);
+  const hidden = generateStencil([identifiedSquare, inner], { ...settings, hiddenContours: ['outline-1'] });
+  assert.deepEqual(hidden, generateStencil([identifiedSquare], settings));
+  assert.deepEqual(tabLayouts, originalLayouts);
+  assert.deepEqual(generateStencil([identifiedSquare, inner], { ...settings, hiddenContours: [] }), before);
+  assert.equal(exportSvg(hidden, 120, 120), exportSvg(generateStencil([identifiedSquare], settings), 120, 120));
+});
+
+test('hidden outlines keep warning numbers stable and suppress their own warnings', () => {
+  const contours = [identifiedSquare, { ...square, id: 'outline-1' }, { ...square, id: 'outline-2' }];
+  const result = generateStencil(contours, { ...options, tabLayouts: { 'outline-0': [], 'outline-2': [] }, hiddenContours: ['outline-0', 'outline-1'] });
+  assert.deepEqual(result.warnings, ['Outline 3 has no tabs; its inner piece may come loose.']);
+  assert.ok(result.bridges.every(b => b.contourId === 'outline-2'));
+});
+
+test('hiding every outline yields empty cuts, tabs and warnings', () => {
+  const result = generateStencil([identifiedSquare], { ...options, hiddenContours: ['outline-0'], tabLayouts: { 'outline-0': [] } });
+  assert.equal(result.paths.length, 0);
+  assert.equal(result.bridges.length, 0);
+  assert.equal(result.warnings.length, 0);
+});
+
 test('custom positions and counts survive global placement and channel changes', () => {
   const tabLayouts = {};
   const tabs = customizeContour(tabLayouts, identifiedSquare, options);

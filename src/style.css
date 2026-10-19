@@ -267,12 +267,39 @@ dialog{padding:27px}
 .small-button{border:1px solid #d8cfe0;border-radius:5px;background:#fff;padding:7px 10px;font-size:12px;line-height:1.4;color:#655175}
 .small-button:hover:not(:disabled){background:#eee7f3;border-color:#aa92bd}
 .small-button[aria-pressed=true]{background:#502c6c;color:white;border-color:#502c6c}
+.session-export{display:flex;align-items:center;gap:8px;width:100%;margin-top:16px;padding:10px 12px;text-align:left}
+.session-export .icon{width:16px;height:16px}
+.session-type{margin-left:auto;color:#918799;font-size:12px}
 .small-button[hidden],.tab-inspector[hidden],.edit-hint[hidden],[hidden]{display:none!important}
 #reset-all-tabs{margin-top:10px}
 .tab-edit-toolbar{display:flex;align-items:center;gap:8px;padding:0 20px 12px;flex-wrap:wrap}
 .edit-spacer{flex:1}
-.edit-hint{margin:0 20px 12px;font-size:12px;line-height:1.6;color:#776880}
-.tab-inspector{flex-shrink:0;margin:0 20px 14px;padding:12px 14px;background:#f4eff8;border:1px solid #d9cce3;border-left:3px solid #826b94;border-radius:7px;color:#4d365e}
+.edit-hint{margin:0 0 12px;font-size:12px;line-height:1.6;color:#776880}
+.editing-panel{position:relative;flex-shrink:0;margin:0 20px 14px;padding:12px 14px;background:#f4eff8;border:1px solid #d9cce3;border-left:3px solid #826b94;border-radius:7px;color:#4d365e}
+.editing-panel::before{content:'';position:absolute;top:-7px;left:calc(var(--mode-caret-left,40px) - 6px);width:12px;height:12px;transform:rotate(45deg);background:#f4eff8;border-top:1px solid #d9cce3;border-left:1px solid #d9cce3;pointer-events:none}
+.tab-inspector.has-selection::before{border-color:#b59cc7}
+.outline-inspector .tab-inspector-heading{flex-wrap:wrap}
+#outline-count{font-size:12px;color:#776880;font-weight:400}
+.outline-inspector .outline-actions{margin-bottom:12px}
+.hidden-outline-toggle{margin:10px 0 12px;line-height:1.6}
+.outline-list{max-height:240px;overflow:auto;overscroll-behavior:contain;border:1px solid #ded3e6;border-radius:6px;background:#fffdfd;scroll-padding:6px}
+.outline-row{display:flex;align-items:center;gap:8px;padding:5px 10px;border-bottom:1px solid #ece6f0;min-width:0}
+.outline-row:last-child{border-bottom:0}
+.outline-row.selected{background:#e9dff1;box-shadow:inset 3px 0 #826b94}
+.outline-select{display:flex;align-items:center;gap:10px;flex:1;min-width:0;padding:5px 2px;text-align:left;font-size:12px;border-radius:3px}
+.outline-select svg{width:34px;height:34px;flex-shrink:0;color:#725287}
+.outline-select span{line-height:1.5}
+.outline-select small{display:block;color:#81738c;font-size:11px;font-weight:400}
+.outline-row.is-hidden .outline-select svg{opacity:.5}
+.outline-row .check-label{color:#655175;flex-shrink:0;min-height:36px}
+.outline-select:focus-visible,.visibility-outline:focus-visible{outline:2px solid #826b94;outline-offset:2px}
+.outline-select:focus-visible{outline-offset:-2px}
+.editing-outlines .visibility-outline{cursor:pointer}
+.outline-guide{stroke:#88739b;stroke-width:1.4;opacity:.65}
+.is-hidden .outline-guide{stroke:#978b9f;stroke-dasharray:4 4;opacity:.6}
+.visibility-outline.selected .outline-guide{stroke:#ff2da6;stroke-width:2.5;opacity:1}
+.visibility-outline:focus-visible .outline-guide{stroke:#258477;opacity:1}
+.outlines-empty{margin:0 20px 14px;font-size:12px;line-height:1.6;color:#776880}
 .tab-inspector.has-selection{border-color:#b59cc7;border-left-color:#826b94;box-shadow:0 2px 8px #502c6c12}
 .tab-inspector-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px;margin-bottom:8px;min-height:24px}
 .tab-inspector-heading strong{line-height:18px}
@@ -301,6 +328,7 @@ dialog{padding:27px}
 .tab-inspector .control>label{display:block;font-size:12px;margin-bottom:6px}
 .tab-inspector select{width:100%;min-height:34px;border:1px solid #e2dde6;border-radius:5px;padding:6px;background-color:#fcfbfd;color:#655175;font:inherit;font-size:12px}
 .tab-inspector .small-button{margin:0;border-color:#d2c1df;color:#655175}
+.tab-inspector .small-button[aria-pressed=true]{border-color:var(--purple);color:#fff}
 .tab-inspector .danger{color:#9b493a;border-color:#dec5bf}
 .preview-footer{gap:12px;flex-wrap:wrap}
 #cut-count{white-space:nowrap}
@@ -313,7 +341,7 @@ dialog{padding:27px}
 .outline-hit-targets>path{cursor:pointer;pointer-events:stroke}
 .adding-tab,.adding-tab .tab-marker,.adding-tab .outline-hit-targets>path{cursor:crosshair}
 .control input:disabled{opacity:.4;cursor:default}
-@media(max-width:720px){.tab-edit-toolbar{padding:0 12px 12px}.edit-hint{margin-left:15px;margin-right:15px}}
+@media(max-width:720px){.tab-edit-toolbar{padding:0 12px 12px}}
 .small-button[aria-pressed=true]:hover{background:#65407e;border-color:#65407e;color:#fff}
 @media(min-width:721px){
   .workspace{overflow:visible}
@@ -322,7 +350,7 @@ dialog{padding:27px}
   .canvas-area{flex:none;height:clamp(480px,calc(100dvh - 240px),900px);min-height:0}
 }
 @media(max-width:720px){
-  .tab-inspector{margin:0 12px 14px;padding:12px}
+  .editing-panel{margin:0 12px 14px;padding:12px}
   .tab-selection-area{height:180px}
   #selected-tab-controls{grid-template-columns:minmax(0,1fr);row-gap:12px}
   .tab-pickers{gap:10px}
@@ -360,3 +388,15 @@ select{
 .selection-scope-options span{display:block;text-align:center;padding:6px 12px;border-radius:4px;color:#80718d;transition:background .15s,color .15s,box-shadow .15s}
 .selection-scope-options input:checked+span{background:#fff;color:#4a375a;box-shadow:0 1px 3px #23192c26}
 .selection-scope-options input:focus-visible+span{outline:2px solid #826b94;outline-offset:2px}
+
+/* Keep the active mode immediately above its panel on narrow previews. */
+@media(max-width:520px){
+  .tab-edit-toolbar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  .tab-edit-toolbar .edit-spacer{display:none}
+  #undo,#redo{grid-row:1}
+  #edit-outlines,#edit-tabs{grid-row:2}
+  /* The mode buttons share two equal columns. Use those column centers so
+     carets track narrow viewports immediately, before resize callbacks run. */
+  .outline-inspector::before{left:calc(25% - 10px)}
+  .tab-inspector::before{left:calc(75% - 4px)}
+}

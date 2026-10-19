@@ -29,6 +29,16 @@ async function load(action) {
 async function click(selector) { $(selector).click(); await sleep(50); }
 async function change(selector, value) { $(selector).value = value; $(selector).dispatchEvent(new w.Event('change', { bubbles: true })); await sleep(50); }
 function flush() { w.dispatchEvent(new w.Event('stencil:before-reload')); }
+async function exportSession() {
+  let blob, filename;
+  const create = w.URL.createObjectURL, anchorClick = w.HTMLAnchorElement.prototype.click;
+  w.URL.createObjectURL = value => { blob = value; return 'blob:session-test'; };
+  w.HTMLAnchorElement.prototype.click = function () { filename = this.download; };
+  try { $('#export-session').click(); }
+  finally { w.URL.createObjectURL = create; w.HTMLAnchorElement.prototype.click = anchorClick; }
+  assert(blob?.type === 'application/json' && filename === 'persistent-session.json');
+  return JSON.parse(await blob.text());
+}
 const selected = () => [...d.querySelectorAll('.tab-marker[aria-pressed="true"]')].map(m => `${m.dataset.outline}/${m.dataset.tab}`);
 const cuts = () => $('.cut-shape').getAttribute('d');
 await load(() => { frame.src = '/?workspace=workspace-tests&live-reload=off'; });
@@ -105,6 +115,51 @@ await check('A drag pending at reload keeps its position and undo history', asyn
   assert(Math.abs(Number($('#selected-tab-position').value) - 48) < 0.02);
   await click('#undo'); await change('#tab-picker', anchorId);
   assert(Math.abs(Number($('#selected-tab-position').value) - before) < 0.02);
+});
+await check('JSON session includes the original SVG, edits, visibility, UI and complete undo/redo history', async () => {
+  await click('#edit-outlines'); await click('#visible-outline-0');
+  flush();
+  const expected = JSON.parse(localStorage.getItem(key));
+  const exported = await exportSession();
+  assert(exported.format === 'stencil-studio-session' && exported.version === 1 && Number.isFinite(Date.parse(exported.exportedAt)));
+  assert(exported.source === expected.source && exported.source.includes('<rect') && exported.source.includes('<circle'));
+  for (const field of ['name', 'example', 'document', 'ui', 'history', 'scroll', 'focus']) {
+    assert(JSON.stringify(exported[field]) === JSON.stringify(expected[field]), `Session lost ${field}`);
+  }
+  assert(exported.document.hiddenContours.includes('outline-0'));
+  assert(Object.keys(exported.document.tabLayouts).length > 0 && exported.history.past.length > 0);
+  const { readWorkspace } = await import('/src/workspace-storage.js');
+  assert(readWorkspace({ getItem: () => JSON.stringify(exported) }), 'Export is not a valid versioned workspace');
+  const before = cuts();
+  localStorage.setItem(key, JSON.stringify(exported));
+  await load(() => w.location.reload());
+  assert(cuts() === before && !$('#visible-outline-0').checked && !$('#outline-inspector').hidden);
+});
+await check('Session export commits pending sliders and unblurred numbers as undoable edits', async () => {
+  for (const value of [2.6, 2.8, 3]) {
+    $('#channelWidth-range').value = value;
+    $('#channelWidth-range').dispatchEvent(new w.Event('input')); await sleep(40);
+  }
+  let exported = await exportSession();
+  assert(exported.document.settings.channelWidth === 3);
+  const before = exported.history.past.length;
+  $('#channelWidth').focus(); $('#channelWidth').value = '3.7';
+  exported = await exportSession();
+  assert(exported.document.settings.channelWidth === 3.7 && exported.history.past.length === before + 1);
+  assert(exported.history.past.at(-1).settings.channelWidth === 3);
+  await click('#undo'); assert($('#channelWidth').value === '3');
+});
+await check('Session export still works with all outlines hidden and browser storage unavailable', async () => {
+  await click('#visible-outline-1');
+  assert($('#download').disabled && !$('#export-session').disabled);
+  const get = w.Storage.prototype.getItem, set = w.Storage.prototype.setItem;
+  let exported;
+  try {
+    w.Storage.prototype.getItem = () => { throw new Error('Storage unavailable'); };
+    w.Storage.prototype.setItem = () => { throw new Error('Storage unavailable'); };
+    exported = await exportSession();
+  } finally { w.Storage.prototype.getItem = get; w.Storage.prototype.setItem = set; }
+  assert(exported.document.hiddenContours.length === 2 && exported.source.includes('<svg'));
 });
 await check('Invalid saved data falls back to a usable default workspace', async () => {
   await load(() => { frame.src = 'about:blank'; });

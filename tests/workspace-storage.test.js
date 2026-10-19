@@ -16,6 +16,26 @@ test('workspace round trip preserves source, selection, endpoint settings and un
   assert.deepEqual(writeWorkspace(store, workspace), { saved: true, historyTruncated: false });
   assert.deepEqual(readWorkspace(store), workspace);
 });
+test('outline visibility, edit mode and mixed old/new history survive storage', () => {
+  const store = storage();
+  const hidden = { ...document, hiddenContours: ['outline-0'] };
+  const saved = { ...workspace, document: hidden, ui: { ...workspace.ui, editing: false, adding: false, editingOutlines: true, showHiddenOutlines: false, selectedOutlines: ['outline-0'] }, history: { past: [document, hidden], future: [hidden] } };
+  writeWorkspace(store, saved);
+  assert.deepEqual(readWorkspace(store), saved);
+});
+test('invalid visibility lists and conflicting editing modes are rejected', () => {
+  const store = storage();
+  for (const hiddenContours of [null, 'outline-0', ['bad-id'], ['outline-0', 'outline-0'], [12]]) {
+    store.setItem(workspaceKey, JSON.stringify({ ...workspace, document: { ...document, hiddenContours } }));
+    assert.equal(readWorkspace(store), null);
+  }
+  for (const ui of [{ editingOutlines: true }, { selectedOutlines: null }, { selectedOutlines: ['unknown'] }, { showHiddenOutlines: 'true' }]) {
+    store.setItem(workspaceKey, JSON.stringify({ ...workspace, ui: { ...workspace.ui, ...ui } }));
+    assert.equal(readWorkspace(store), null);
+  }
+  store.setItem(workspaceKey, JSON.stringify({ ...workspace, history: { past: [{ ...document, hiddenContours: null }], future: [] } }));
+  assert.equal(readWorkspace(store), null);
+});
 test('corrupt or incompatible workspace data is ignored', () => {
   const store = storage();
   for (const invalid of ['{', 'null', JSON.stringify({ ...workspace, version: 2 }), JSON.stringify({ ...workspace, document: { ...document, settings: { ...document.settings, artworkWidth: -1 } } }), JSON.stringify({ ...workspace, ui: { ...workspace.ui, selectedTabs: null } })]) {

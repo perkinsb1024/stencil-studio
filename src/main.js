@@ -22,8 +22,9 @@ const icons = {
 };
 const icon = (name, cls = '') => `<svg class="icon ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] || ''}</svg>`;
 const defaults = { artworkWidth: 150, channelWidth: 1.5, tabWidth: 3, tabCount: 4, tabOffset: 0, margin: 8 };
-const state = { ...defaults, artwork: null, source: null, example: '', name: 'Bloom.svg', view: 'material', showTabs: true, showOriginal: false, zoom: 1, sourceWarnings: [], result: null, scaled: null, tabLayouts: {}, editing: false, adding: false, selectedContour: null, selectedTab: null, selectedTabs: [], selectCurrentOutlineOnly: true };
+const state = { ...defaults, artwork: null, source: null, example: '', name: 'Bloom.svg', view: 'material', showTabs: true, showOriginal: false, zoom: 1, sourceWarnings: [], result: null, scaled: null, tabLayouts: {}, hiddenContours: [], editingOutlines: false, selectedOutlines: [], showHiddenOutlines: true, editing: false, adding: false, selectedContour: null, selectedTab: null, selectedTabs: [], selectCurrentOutlineOnly: true };
 const $ = s => document.querySelector(s);
+const outlineThumbnails = new WeakMap();
 
 document.querySelector('#app').innerHTML = `
   <header class="app-header">
@@ -51,21 +52,29 @@ document.querySelector('#app').innerHTML = `
           <button class="small-button" id="reset-all-tabs" disabled>Reset all to automatic</button>
 
         </section>
-        <section class="control-section output-section"><div class="section-heading"><span class="step">03</span><h2>Ready for your cutter</h2></div><button id="download" class="download-button">${icon('download')}<span>Download stencil</span><span class="download-type">.svg</span></button><p class="export-note">Closed vector paths · actual-size export</p></section>
+        <section class="control-section output-section"><div class="section-heading"><span class="step">03</span><h2>Ready for your cutter</h2></div><button id="download" class="download-button">${icon('download')}<span>Download stencil</span><span class="download-type">.svg</span></button><p class="export-note">Closed vector paths · actual-size export</p><button id="export-session" class="small-button session-export">${icon('download')}<span>Export session</span><span class="session-type">.json</span></button><p class="export-note">Original SVG · settings · edits · undo history</p></section>
         <div class="privacy-note">Your files stay on your device.</div>
       </aside>
       <section class="preview-panel" aria-label="Stencil preview">
         <div class="preview-toolbar"><div class="preview-heading"><span class="live-dot"></span><h2>Live preview</h2></div><div class="view-switch" role="group" aria-label="Preview mode"><button id="material-view" class="active" aria-pressed="true">Stencil</button><button id="cut-view" aria-pressed="false">Cut paths</button></div></div>
         <div class="preview-options"><label class="check-label"><input type="checkbox" id="show-tabs" checked /><span>Highlight tabs</span><span class="swatch amber"></span></label><label class="check-label"><input type="checkbox" id="show-original" /><span>Original outline</span></label><span class="preview-units">UNITS: MM</span></div>
-        <div class="tab-edit-toolbar" role="group" aria-label="Tab editing">
-          <button id="edit-tabs" class="small-button" aria-pressed="false">Edit tabs</button>
+        <div class="tab-edit-toolbar" role="group" aria-label="Editing mode">
+          <button id="edit-outlines" class="small-button" aria-pressed="false" aria-controls="outline-inspector" aria-expanded="false">Edit outlines</button>
+          <button id="edit-tabs" class="small-button" aria-pressed="false" aria-controls="tab-inspector" aria-expanded="false">Edit tabs</button>
           <span class="edit-spacer"></span>
           <button id="undo" class="small-button" aria-label="Undo last change" title="Undo (⌘/Ctrl Z)" disabled>Undo</button>
           <button id="redo" class="small-button" aria-label="Redo last change" title="Redo (⌘/Ctrl Shift Z)" disabled>Redo</button>
         </div>
-        <p class="edit-hint" id="edit-hint" role="status" hidden></p>
-        <section class="tab-inspector" id="tab-inspector" aria-label="Selected tab editor" hidden>
+        <section class="outline-inspector editing-panel" id="outline-inspector" aria-label="Outline visibility editor" hidden>
+          <div class="tab-inspector-heading"><strong>Outline visibility</strong><span id="outline-count" role="status"></span></div>
+          <p class="edit-hint">Select an outline in the preview or list; Shift selects several. Uncheck Visible or choose Hide selected to leave it out of the stencil and download. Your tab edits are preserved.</p>
+          <div class="outline-actions"><button id="hide-outlines" class="small-button" disabled>Hide selected</button><button id="show-outlines" class="small-button" disabled>Show selected</button><button id="keep-only-outlines" class="small-button" disabled>Show only selected</button><button id="show-all-outlines" class="small-button" disabled>Show all outlines</button></div>
+          <label class="check-label hidden-outline-toggle"><input type="checkbox" id="show-hidden-outlines" checked /><span>Show hidden outlines as dashed guides</span></label>
+          <div id="outline-list" class="outline-list" role="group" aria-label="Outlines"></div>
+        </section>
+        <section class="tab-inspector editing-panel" id="tab-inspector" aria-label="Selected tab editor" hidden>
           <div class="tab-inspector-heading"><strong id="selected-outline-label">Tab editing</strong><span id="outline-mode" class="mode-badge"></span></div>
+          <p class="edit-hint" id="edit-hint" role="status" hidden></p>
           <div class="tab-pickers">
             <div><label for="outline-picker">Outline</label><select id="outline-picker" aria-label="Select outline"></select></div>
             <div><label for="tab-picker">Tab</label><select id="tab-picker" aria-label="Select tab"></select></div>
@@ -87,6 +96,7 @@ document.querySelector('#app').innerHTML = `
           <div class="outline-actions"><button id="inherit-tab-width" class="small-button" disabled>Use default width</button><button id="remove-tab" class="small-button danger" disabled>Remove selected tab</button><button id="add-tab" class="small-button" aria-pressed="false" hidden>Add tab</button><button id="reset-outline" class="small-button" title="Clears this outline’s custom positions and width overrides. Undo is available.">Reset outline to automatic</button></div>
           <p class="control-hint" id="outline-mode-hint"></p>
         </section>
+        <p id="outlines-empty" class="outlines-empty" role="status" hidden>All outlines are hidden. Use Edit outlines to show them again. Nothing will be exported.</p>
         <div class="canvas-area" id="canvas-area">
           <div class="canvas-viewport" id="canvas-viewport">
             <div class="canvas-corner top-left"></div><div class="canvas-corner bottom-right"></div>
@@ -102,7 +112,7 @@ document.querySelector('#app').innerHTML = `
     </div>
   </main>
   <div id="notice" class="notice" role="status" hidden></div>
-  <dialog id="help-dialog"><button id="close-help" class="icon-button dialog-close" aria-label="Close help">${icon('close')}</button><div class="eyebrow">A QUICK FIELD GUIDE</div><h2>A cut above.</h2><p>Make a reusable outline stencil in three steps.</p><ol><li><strong>Bring your vectors.</strong><span>Upload an SVG with paths or shapes. Convert text, masks, and clipping to plain paths in your drawing app first.</span></li><li><strong>Make room for the cut.</strong><span>Channel width sets the strip of material to remove along each outline. Tabs leave small uncut bridges that hold the inner pieces in place.</span></li><li><strong>Send it to your cutter.</strong><span>Download the SVG, import it into your cutter’s software, and cut the edges of the black shapes. Match the imported size to the SVG dimensions.</span></li></ol><div class="help-tip"><strong>Before the big cut</strong><p>Black areas come out; light areas stay. Amber squares mark automatic tabs; teal circles mark custom tabs. Both are preview-only. Use Edit tabs to add, remove, move, or resize individual tabs. Editing makes that outline custom; automatic placement then affects only other outlines. Default width still applies unless a tab has a width override. Inspect small details and overlapping outlines, and test-cut a sample for your material. The sheet boundary is not exported as a cut.</p></div><button id="got-it" class="download-button">Got it ${icon('check')}</button></dialog>
+  <dialog id="help-dialog"><button id="close-help" class="icon-button dialog-close" aria-label="Close help">${icon('close')}</button><div class="eyebrow">A QUICK FIELD GUIDE</div><h2>A cut above.</h2><p>Make a reusable outline stencil in three steps.</p><ol><li><strong>Bring your vectors.</strong><span>Upload an SVG with paths or shapes. Convert text, masks, and clipping to plain paths in your drawing app first.</span></li><li><strong>Make room for the cut.</strong><span>Channel width sets the strip of material to remove along each outline. Tabs leave small uncut bridges that hold the inner pieces in place.</span></li><li><strong>Send it to your cutter.</strong><span>Download the SVG, import it into your cutter’s software, and cut the edges of the black shapes. Match the imported size to the SVG dimensions.</span></li></ol><div class="help-tip"><strong>Before the big cut</strong><p>Black areas come out; light areas stay. Amber squares mark automatic tabs; teal circles mark custom tabs. Both are preview-only. Use Edit outlines to hide or show outlines without losing their tab edits. Hidden outlines are left out of the download. Use Edit tabs to add, remove, move, or resize individual tabs. Editing makes that outline custom; automatic placement then affects only other outlines. Default width still applies unless a tab has a width override. Inspect small details and overlapping outlines, and test-cut a sample for your material. The sheet boundary is not exported as a cut.</p></div><button id="got-it" class="download-button">Got it ${icon('check')}</button></dialog>
 `;
 
 let noticeTimer;
@@ -117,37 +127,117 @@ function render() {
   state.scaled = scaleArtwork(state.artwork, state.artworkWidth, Math.max(state.margin, state.channelWidth / 2 + 2));
   state.result = generateStencil(state.scaled.contours, state);
   const { width, height, contours, artworkHeight } = state.scaled;
+  const visible = visibleContours();
+  if (!visible.some(c => c.id === state.selectedContour)) selectTab(visible[0]?.id ?? null, null);
+  if (!visible.length) { state.editing = false; state.adding = false; }
   // Drop selections removed by resets, undo, or changes to automatic placement.
   state.selectedTabs = state.selectedTab == null ? [] : state.selectedTabs.filter(ref => state.result.bridges.some(b => matchesTab(b, ref)));
   if (state.selectedTabs.length && !selectedBridge()) {
     state.selectedContour = state.selectedTabs[0].contourId; state.selectedTab = state.selectedTabs[0].id;
   }
   updateTabEditor();
+  updateOutlineEditor();
   const svg = $('#preview-svg');
   svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
   svg.style.aspectRatio = `${width} / ${height}`;
   fitSheet();
   const cuts = state.result.paths.map(p => pathData(p)).join('');
   svg.innerHTML = `<rect width="${width}" height="${height}" fill="#fffef9"/><path class="cut-shape" d="${cuts}" fill="${state.view === 'material' ? '#502c6c' : 'none'}" stroke="${state.view === 'cut' ? '#502c6c' : 'none'}" stroke-width="0.14" fill-rule="evenodd"/>`;
-  if (state.showOriginal) svg.innerHTML += `<g fill="none" stroke="#6f8bca" stroke-width="0.18" stroke-dasharray="1 0.7">${contours.map(c => `<path d="${pathData(c.points, c.closed)}"/>`).join('')}</g>`;
-  if (state.editing) svg.innerHTML += `<g class="outline-hit-targets" fill="none" stroke="transparent" stroke-width="18" vector-effect="non-scaling-stroke">${contours.map(c => `<path data-outline="${c.id}" d="${pathData(c.points, c.closed)}" vector-effect="non-scaling-stroke"/>`).join('')}</g>`;
+  if (state.showOriginal) svg.innerHTML += `<g class="original-outlines" fill="none" stroke="#6f8bca" stroke-width="0.18" stroke-dasharray="1 0.7" pointer-events="none">${visible.map(c => `<path d="${pathData(c.points, c.closed)}"/>`).join('')}</g>`;
+  if (state.editing) svg.innerHTML += `<g class="outline-hit-targets" fill="none" stroke="transparent" stroke-width="18" vector-effect="non-scaling-stroke">${visible.map(c => `<path data-outline="${c.id}" d="${pathData(c.points, c.closed)}" vector-effect="non-scaling-stroke"/>`).join('')}</g>`;
   if (state.editing && state.selectedContour) {
     const selected = contours.find(c => c.id === state.selectedContour);
     if (selected) svg.innerHTML += `<path d="${pathData(selected.points, selected.closed)}" fill="none" stroke="#258477" stroke-width="1" stroke-dasharray="3 4" vector-effect="non-scaling-stroke" pointer-events="none" opacity="0.6"/>`;
   }
-  if (state.showTabs || state.editing) svg.innerHTML += renderTabMarkers();
+  if ((state.showTabs || state.editing) && !state.editingOutlines) svg.innerHTML += renderTabMarkers();
+  if (state.editingOutlines) svg.innerHTML += renderOutlineTargets();
   svg.classList.toggle('editing-tabs', state.editing);
+  svg.classList.toggle('editing-outlines', state.editingOutlines);
   svg.classList.toggle('adding-tab', state.adding);
   $('#dimension-width').textContent = `${width.toFixed(1)} mm`;
   $('#dimension-height').textContent = `${height.toFixed(1)} mm`;
   $('#cut-count').textContent = `${state.result.paths.length} cut regions · ${state.result.bridges.length} tabs`;
-  $('#source-info').textContent = `${state.artwork.contours.length} contours · ${state.artworkWidth} × ${artworkHeight.toFixed(1)} mm`;
+  $('#source-info').textContent = `${visible.length} of ${contours.length} outlines visible · ${state.artworkWidth} × ${artworkHeight.toFixed(1)} mm`;
+  $('#outlines-empty').hidden = visible.length > 0;
   $('#offset-value').textContent = `${state.tabOffset}%`;
   fitSheet();
-  const warnings = [...state.sourceWarnings, ...state.result.warnings];
+  const warnings = [...state.sourceWarnings.filter(w => w !== 'Open paths are included as channels with square ends.' || visible.some(c => !c.closed)), ...state.result.warnings];
   $('#download').disabled = state.result.paths.length === 0;
   if (warnings.length) notify(warnings.join(' '), 'warning');
   else if ($('#notice').classList.contains('warning')) $('#notice').hidden = true;
+}
+
+function visibleContours() { return state.scaled.contours.filter(c => !state.hiddenContours.includes(c.id)); }
+function outlineNumber(id) { return state.artwork.contours.findIndex(c => c.id === id) + 1; }
+function pointToMode(panelId, buttonId) {
+  const panel = $(`#${panelId}`), button = $(`#${buttonId}`);
+  if (panel.hidden) return;
+  const bounds = button.getBoundingClientRect();
+  panel.style.setProperty('--mode-caret-left', `${bounds.left + bounds.width / 2 - panel.getBoundingClientRect().left - parseFloat(getComputedStyle(panel).borderLeftWidth)}px`);
+}
+function renderOutlineTargets() {
+  return `<g class="outline-visibility-targets">${state.scaled.contours.map(c => {
+    const hidden = state.hiddenContours.includes(c.id), selected = state.selectedOutlines.includes(c.id);
+    if (hidden && !state.showHiddenOutlines) return '';
+    return `<g data-visibility-outline="${c.id}" class="visibility-outline ${hidden ? 'is-hidden' : ''} ${selected ? 'selected' : ''}" tabindex="0" role="button" aria-label="Outline ${outlineNumber(c.id)}, ${hidden ? 'hidden' : 'visible'}" aria-pressed="${selected}">
+      <path class="outline-guide" d="${pathData(c.points, c.closed)}" fill="none" vector-effect="non-scaling-stroke" pointer-events="none"/>
+      <path d="${pathData(c.points, c.closed)}" fill="none" stroke="transparent" stroke-width="18" vector-effect="non-scaling-stroke" pointer-events="stroke"/>
+    </g>`;
+  }).join('')}</g>`;
+}
+function selectOutline(id, additive = false) {
+  if (!id) { if (!additive) state.selectedOutlines = []; }
+  else if (additive) state.selectedOutlines = state.selectedOutlines.includes(id) ? state.selectedOutlines.filter(value => value !== id) : [...state.selectedOutlines, id];
+  else state.selectedOutlines = [id];
+  render();
+}
+function setOutlineVisibility(ids, visible) {
+  mutate(() => {
+    const hidden = new Set(state.hiddenContours);
+    for (const id of ids) { if (visible) hidden.delete(id); else hidden.add(id); }
+    state.hiddenContours = state.artwork.contours.filter(c => hidden.has(c.id)).map(c => c.id);
+  });
+}
+function outlineThumbnail(contour) {
+  if (outlineThumbnails.has(contour)) return outlineThumbnails.get(contour);
+  const xs = contour.points.map(p => p.x), ys = contour.points.map(p => p.y);
+  const x = Math.min(...xs), y = Math.min(...ys), width = Math.max(...xs) - x, height = Math.max(...ys) - y;
+  const padding = Math.max(width, height, 1) * 0.1;
+  // Keep the full contour: sampling by vertex index can skip whole corners
+  // when curved sections have many more vertices than straight sections.
+  const thumbnail = `<svg viewBox="${x - padding} ${y - padding} ${width + padding * 2} ${height + padding * 2}" aria-hidden="true"><path d="${pathData(contour.points, contour.closed)}" fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>`;
+  outlineThumbnails.set(contour, thumbnail);
+  return thumbnail;
+}
+function updateOutlineEditor() {
+  $('#edit-outlines').textContent = state.editingOutlines ? 'Done editing' : 'Edit outlines';
+  $('#edit-outlines').setAttribute('aria-pressed', state.editingOutlines);
+  $('#edit-outlines').setAttribute('aria-expanded', state.editingOutlines);
+  $('#outline-inspector').hidden = !state.editingOutlines;
+  $('#outline-count').textContent = `${visibleContours().length} of ${state.scaled.contours.length} visible`;
+  $('#show-hidden-outlines').checked = state.showHiddenOutlines;
+  const selected = state.selectedOutlines;
+  $('#hide-outlines').disabled = !selected.some(id => !state.hiddenContours.includes(id));
+  $('#show-outlines').disabled = !selected.some(id => state.hiddenContours.includes(id));
+  $('#keep-only-outlines').disabled = selected.length === 0;
+  $('#show-all-outlines').disabled = state.hiddenContours.length === 0;
+  // Retain the list DOM across unrelated renders (including viewport resizing).
+  const list = $('#outline-list');
+  const key = JSON.stringify([state.hiddenContours, selected]);
+  if (list.artwork !== state.artwork || list.visibilityKey !== key) {
+    const focus = list.contains(document.activeElement) ? document.activeElement.id : null;
+    list.innerHTML = state.artwork.contours.map(c => {
+      const hidden = state.hiddenContours.includes(c.id), active = selected.includes(c.id), number = outlineNumber(c.id);
+      return `<div class="outline-row ${active ? 'selected' : ''} ${hidden ? 'is-hidden' : ''}">
+        <button id="select-${c.id}" class="outline-select" data-select-outline="${c.id}" aria-pressed="${active}">${outlineThumbnail(c)}<span>Outline ${number}<small>${hidden ? 'Hidden' : 'Visible'} · ${c.closed ? 'Closed' : 'Open'}</small></span></button>
+        <label class="check-label"><input id="visible-${c.id}" type="checkbox" data-visible-outline="${c.id}" aria-label="Outline ${number} visible" ${hidden ? '' : 'checked'} /><span>Visible</span></label>
+      </div>`;
+    }).join('');
+    list.artwork = state.artwork; list.visibilityKey = key;
+    if (focus) document.getElementById(focus)?.focus({ preventScroll: true });
+  }
+  pointToMode('outline-inspector', 'edit-outlines');
+  pointToMode('tab-inspector', 'edit-tabs');
 }
 
 function fitSheet() {
@@ -217,30 +307,32 @@ function renderTabMarkers() {
   }).join('')}</g>`;
 }
 function updateTabEditor() {
-  const contours = state.scaled.contours;
+  const contours = visibleContours();
   const automatic = contours.filter(c => !Object.hasOwn(state.tabLayouts, c.id)).length;
   const custom = contours.length - automatic;
   $('#automatic-scope').textContent = `Placement applies to ${automatic} automatic outline${automatic === 1 ? '' : 's'} · ${custom} custom. Default width applies unless overridden.`;
   for (const id of ['tabCount', 'tabOffset', 'tabs-minus', 'tabs-plus']) $(`#${id}`).disabled = automatic === 0;
-  $('#reset-all-tabs').disabled = custom === 0;
+  $('#reset-all-tabs').disabled = Object.keys(state.tabLayouts).length === 0;
   $('#edit-tabs').textContent = state.editing ? 'Done editing' : 'Edit tabs';
   $('#edit-tabs').setAttribute('aria-pressed', state.editing);
+  $('#edit-tabs').setAttribute('aria-expanded', state.editing);
+  $('#edit-tabs').disabled = contours.length === 0;
   $('#add-tab').hidden = !state.editing;
   $('#add-tab').setAttribute('aria-pressed', state.adding);
-  $('#add-tab').textContent = state.adding ? 'Cancel adding' : 'Add tab';
+  $('#add-tab').textContent = state.adding ? 'Done adding' : 'Add tab';
   $('#edit-hint').hidden = !state.editing;
-  $('#edit-hint').textContent = state.adding ? 'Click an outline to add a tab at the previewed position. Esc cancels.' : `Drag a tab along its outline to move it. Drag empty space to select tabs ${state.selectCurrentOutlineOnly ? 'on the current outline' : 'across outlines'}; Shift adds to the selection. Width applies to all selected tabs; position moves them together.`;
+  $('#edit-hint').textContent = state.adding ? 'Click outlines to keep adding tabs at the previewed positions. Click Done adding or press Escape to finish.' : `Drag a tab along its outline to move it. Drag empty space to select tabs ${state.selectCurrentOutlineOnly ? 'on the current outline' : 'across outlines'}; Shift adds to the selection. Width applies to all selected tabs; position moves them together.`;
   $('#tab-inspector').hidden = !state.editing;
-  $('#show-tabs').disabled = state.editing;
-  $('#show-tabs').checked = state.editing || state.showTabs;
+  $('#show-tabs').disabled = state.editing || state.editingOutlines;
+  $('#show-tabs').checked = !state.editingOutlines && (state.editing || state.showTabs);
+  $('#outline-picker').innerHTML = contours.map(c => `<option value="${c.id}">Outline ${outlineNumber(c.id)} · ${Object.hasOwn(state.tabLayouts, c.id) ? 'Custom' : 'Automatic'}</option>`).join('');
   const contour = selectedContour();
   if (!contour) return;
   const isCustom = Object.hasOwn(state.tabLayouts, contour.id);
-  const outlineNumber = contours.indexOf(contour) + 1;
+  const number = outlineNumber(contour.id);
   $('#outline-mode').textContent = isCustom ? 'Custom' : 'Automatic';
   $('#outline-mode').classList.toggle('custom', isCustom);
   $('#outline-mode-hint').textContent = isCustom ? 'Custom placement is preserved. Widths follow the default unless overridden.' : 'Editing a tab makes this outline custom and preserves its placement.';
-  $('#outline-picker').innerHTML = contours.map((c, i) => `<option value="${c.id}">Outline ${i + 1} · ${Object.hasOwn(state.tabLayouts, c.id) ? 'Custom' : 'Automatic'}</option>`).join('');
   $('#outline-picker').value = contour.id;
   const tabs = state.result.bridges.filter(b => b.contourId === contour.id);
   $('#tab-picker').innerHTML = '<option value="">Select a tab…</option>' + tabs.map((b, i) => `<option value="${b.id}">Tab ${i + 1} · ${b.width.toFixed(1)} mm${b.widthOverride == null ? ' · Default' : ' · Override'}</option>`).join('');
@@ -255,7 +347,7 @@ function updateTabEditor() {
   $('#remove-tab').disabled = !bridge;
   $('#inherit-tab-width').disabled = !bridge || bridge.widthOverride == null;
   $('#tab-inspector').classList.toggle('has-selection', !!bridge);
-  $('#selected-outline-label').textContent = multiple ? `${selection.length} tabs selected` : bridge ? `Selected tab · Outline ${outlineNumber} · Tab ${tabs.indexOf(bridge) + 1}` : `Tab editing · Outline ${outlineNumber}`;
+  $('#selected-outline-label').textContent = multiple ? `${selection.length} tabs selected` : bridge ? `Selected tab · Outline ${number} · Tab ${tabs.indexOf(bridge) + 1}` : `Tab editing · Outline ${number}`;
   if (bridge) {
     $('#selected-tab-width').value = bridge.requestedWidth;
     $('#selected-tab-width-range').value = bridge.requestedWidth;
@@ -274,7 +366,6 @@ function addTab(contourId, position) {
     const tabs = customizeSelected();
     const id = `tab-${crypto.randomUUID()}`;
     tabs.push({ id, position, widthOverride: null }); selectTab(contourId, id);
-    state.adding = false;
   });
 }
 function removeSelectedTab() {
@@ -305,9 +396,31 @@ function updateSelectedTab(property, value, live = false) {
   if (live) { apply(); scheduleRender(); }
   else { mutate(apply); positionGesture = null; }
 }
-$('#edit-tabs').addEventListener('click', () => {
-  state.editing = !state.editing; state.adding = false; render();
+function toggleEditing(mode) {
+  if (drag) finishDrag({ pointerId: drag.pointerId }, true);
+  commitSettings(); clearGhost();
+  const enabled = !state[mode];
+  state.editing = mode === 'editing' && enabled;
+  state.editingOutlines = mode === 'editingOutlines' && enabled;
+  state.adding = false;
+  render();
+}
+$('#edit-tabs').addEventListener('click', () => toggleEditing('editing'));
+$('#edit-outlines').addEventListener('click', () => toggleEditing('editingOutlines'));
+$('#outline-list').addEventListener('click', e => {
+  const button = e.target.closest('[data-select-outline]');
+  if (button) selectOutline(button.dataset.selectOutline, e.shiftKey);
 });
+$('#outline-list').addEventListener('change', e => {
+  if (e.target.matches('[data-visible-outline]')) setOutlineVisibility([e.target.dataset.visibleOutline], e.target.checked);
+});
+$('#show-hidden-outlines').addEventListener('change', e => { state.showHiddenOutlines = e.target.checked; render(); });
+$('#hide-outlines').addEventListener('click', () => setOutlineVisibility(state.selectedOutlines, false));
+$('#show-outlines').addEventListener('click', () => setOutlineVisibility(state.selectedOutlines, true));
+$('#show-all-outlines').addEventListener('click', () => setOutlineVisibility(state.hiddenContours, true));
+$('#keep-only-outlines').addEventListener('click', () => mutate(() => {
+  state.hiddenContours = state.artwork.contours.filter(c => !state.selectedOutlines.includes(c.id)).map(c => c.id);
+}));
 $('#add-tab').addEventListener('click', () => { state.adding = !state.adding; render(); });
 document.querySelectorAll('input[name="rectangle-selection-scope"]').forEach(input => {
   input.addEventListener('change', e => { state.selectCurrentOutlineOnly = e.target.value === 'selected'; updateTabEditor(); queueWorkspaceSave(); });
@@ -345,7 +458,7 @@ function nearestOutline(event) {
   const point = svgPoint(event);
   if (!point) return null;
   let nearest = null;
-  for (const contour of state.scaled.contours) {
+  for (const contour of visibleContours()) {
     const projected = nearestOnContour(contour, point);
     if (!nearest || projected.distance < nearest.distance) nearest = { ...projected, contour };
   }
@@ -375,7 +488,7 @@ preview.addEventListener('pointerdown', e => {
   if (!state.editing || e.button !== 0 || drag) return;
   if (state.adding) {
     const nearest = nearestOutline(e);
-    if (nearest) { e.preventDefault(); addTab(nearest.contour.id, nearest.position); }
+    if (nearest) { e.preventDefault(); addTab(nearest.contour.id, nearest.position); showGhost(e); }
     return;
   }
   commitSettings();
@@ -397,6 +510,11 @@ preview.addEventListener('pointerdown', e => {
   e.preventDefault(); render();
 });
 preview.addEventListener('click', e => {
+  if (state.editingOutlines) {
+    const outline = e.target.closest('[data-visibility-outline]');
+    selectOutline(outline?.dataset.visibilityOutline, e.shiftKey);
+    return;
+  }
   if (!state.editing || state.adding || e.detail !== 0) return;
   const marker = e.target.closest('[data-tab]');
   if (!marker) return;
@@ -439,6 +557,19 @@ preview.addEventListener('pointercancel', e => finishDrag(e, true));
 preview.addEventListener('lostpointercapture', e => finishDrag(e, true));
 preview.addEventListener('pointerleave', clearGhost);
 $('#preview-svg').addEventListener('keydown', e => {
+  if (state.editingOutlines) {
+    const outline = e.target.closest('[data-visibility-outline]');
+    if (!outline || !['Enter', ' ', 'Delete', 'Backspace'].includes(e.key)) return;
+    e.preventDefault();
+    const id = outline.dataset.visibilityOutline;
+    if (e.key === 'Enter' || e.key === ' ') selectOutline(id, e.shiftKey);
+    else {
+      if (!state.selectedOutlines.includes(id)) state.selectedOutlines = [id];
+      setOutlineVisibility(state.selectedOutlines, false);
+    }
+    (preview.querySelector(`[data-visibility-outline="${id}"]`) ?? $(`#select-${id}`)).focus({ preventScroll: true });
+    return;
+  }
   const marker = e.target.closest('[data-tab]');
   if (!marker || !state.editing) return;
   if (['Enter', ' ', 'Delete', 'Backspace', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
@@ -457,13 +588,23 @@ $('#preview-svg').addEventListener('keydown', e => {
     (target ?? $('#tab-picker')).focus();
   }
 });
+$('#outline-list').addEventListener('keydown', e => {
+  const button = e.target.closest('[data-select-outline]');
+  if (!button || !['Delete', 'Backspace'].includes(e.key)) return;
+  e.preventDefault();
+  if (!state.selectedOutlines.includes(button.dataset.selectOutline)) state.selectedOutlines = [button.dataset.selectOutline];
+  setOutlineVisibility(state.selectedOutlines, false);
+});
 document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && (state.adding || drag)) {
+    e.preventDefault();
+    if (drag) finishDrag({ pointerId: drag.pointerId }, true);
+    state.adding = false; clearGhost(); render();
+    return;
+  }
   if (e.target.closest('input, select, textarea, [contenteditable="true"]')) return;
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
     e.preventDefault(); commitSettings(); if (e.shiftKey) history.redo(); else history.undo();
-  } else if (e.key === 'Escape') {
-    if (drag) finishDrag({ pointerId: drag.pointerId }, true);
-    state.adding = false; clearGhost(); render();
   }
 });
 
@@ -472,7 +613,7 @@ function loadSource(source, name, example = '') {
     const artwork = importSvg(source);
     cancelAnimationFrame(renderFrame);
     state.artwork = artwork; state.source = source; state.example = example; state.name = name; state.sourceWarnings = artwork.warnings; state.zoom = 1;
-    state.tabLayouts = {}; state.selectedContour = artwork.contours[0].id; state.selectedTab = null; state.adding = false;
+    state.tabLayouts = {}; state.hiddenContours = []; state.selectedOutlines = []; state.selectedTabs = []; state.selectedContour = artwork.contours[0].id; state.selectedTab = null; state.adding = false;
     history.clear(); pendingSettings = null;
     $('#filename').textContent = name;
     document.querySelectorAll('[data-example]').forEach(b => b.classList.toggle('active', b.dataset.example === example));
@@ -513,12 +654,13 @@ function createHistory() {
   };
 }
 function snapshot() {
-  return structuredClone({ settings: Object.fromEntries(Object.keys(defaults).map(key => [key, state[key]])), tabLayouts: state.tabLayouts });
+  return structuredClone({ settings: Object.fromEntries(Object.keys(defaults).map(key => [key, state[key]])), tabLayouts: state.tabLayouts, hiddenContours: state.hiddenContours });
 }
 function restore(saved) {
   cancelAnimationFrame(renderFrame); pendingSettings = null; positionGesture = null;
   Object.assign(state, saved.settings); state.tabLayouts = structuredClone(saved.tabLayouts);
-  state.selectedTab = null; state.adding = false;
+  state.hiddenContours = [...(saved.hiddenContours ?? [])];
+  state.selectedTab = null;
   syncSettingInputs(); render(); updateHistoryButtons();
 }
 function updateHistoryButtons() {
@@ -570,18 +712,36 @@ for (const mode of ['material', 'cut']) $(`#${mode}-view`).addEventListener('cli
 $('#zoom-in').addEventListener('click', () => { state.zoom = Math.min(3, state.zoom + 0.25); fitSheet(); });
 $('#zoom-out').addEventListener('click', () => { state.zoom = Math.max(0.25, state.zoom - 0.25); fitSheet(); });
 $('#zoom-fit').addEventListener('click', () => { state.zoom = 1; fitSheet(); });
+function downloadFile(data, type, filename) {
+  const url = URL.createObjectURL(new Blob([data], { type }));
+  const link = document.createElement('a'); link.href = url; link.download = filename; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 $('#download').addEventListener('click', () => {
   if (!state.result?.paths.length) return;
   const data = exportSvg(state.result, state.scaled.width, state.scaled.height, state.name.replace(/\.svg$/i, '') + ' stencil');
-  const url = URL.createObjectURL(new Blob([data], { type: 'image/svg+xml' }));
-  const link = document.createElement('a'); link.href = url; link.download = state.name.replace(/\.svg$/i, '') + '-stencil.svg'; link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  downloadFile(data, 'image/svg+xml', state.name.replace(/\.svg$/i, '') + '-stencil.svg');
   notify(`Stencil downloaded — ${state.scaled.width.toFixed(1)} × ${state.scaled.height.toFixed(1)} mm.`);
+});
+$('#export-session').addEventListener('click', () => {
+  if (!state.source) return;
+  commitWorkspaceEdits();
+  const session = { format: 'stencil-studio-session', exportedAt: new Date().toISOString(), ...captureWorkspace() };
+  downloadFile(JSON.stringify(session, null, 2) + '\n', 'application/json', state.name.replace(/\.svg$/i, '') + '-session.json');
+  notify('Session exported with the original SVG, settings, edits, and undo history.');
 });
 $('#help').addEventListener('click', () => $('#help-dialog').showModal());
 for (const id of ['close-help', 'got-it']) $(`#${id}`).addEventListener('click', () => $('#help-dialog').close());
 $('#help-dialog').addEventListener('click', e => { if (e.target === $('#help-dialog')) { const r = e.target.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) e.target.close(); } });
 new ResizeObserver(scheduleRender).observe($('#canvas-viewport'));
+function updateModeCarets() {
+  pointToMode('outline-inspector', 'edit-outlines');
+  pointToMode('tab-inspector', 'edit-tabs');
+}
+const modeObserver = new ResizeObserver(updateModeCarets);
+for (const id of ['edit-tabs', 'edit-outlines', 'tab-inspector', 'outline-inspector']) modeObserver.observe($(`#${id}`));
+window.addEventListener('resize', updateModeCarets);
+document.fonts.ready.then(updateModeCarets);
 let workspaceSaveTimer;
 let storageWarningShown = false;
 updateRangePaint();
@@ -597,17 +757,20 @@ function queueWorkspaceSave() {
   clearTimeout(workspaceSaveTimer);
   workspaceSaveTimer = setTimeout(saveWorkspace, 150);
 }
-function saveWorkspace() {
-  clearTimeout(workspaceSaveTimer);
-  if (!state.source) return;
-  const ui = Object.fromEntries(['view', 'showTabs', 'showOriginal', 'zoom', 'editing', 'adding', 'selectedContour', 'selectedTab', 'selectedTabs', 'selectCurrentOutlineOnly'].map(key => [key, state[key]]));
+function captureWorkspace() {
+  const ui = Object.fromEntries(['view', 'showTabs', 'showOriginal', 'zoom', 'editing', 'adding', 'selectedContour', 'selectedTab', 'selectedTabs', 'selectCurrentOutlineOnly', 'editingOutlines', 'selectedOutlines', 'showHiddenOutlines'].map(key => [key, state[key]]));
   const viewport = $('#canvas-viewport');
-  const saved = {
+  return {
     version: 1, source: state.source, name: state.name, example: state.example,
     document: snapshot(), ui, history: history.serialize(),
     scroll: { x: window.scrollX, y: window.scrollY, canvasX: viewport.scrollLeft, canvasY: viewport.scrollTop },
     focus: document.activeElement?.id || null,
   };
+}
+function saveWorkspace() {
+  clearTimeout(workspaceSaveTimer);
+  if (!state.source) return;
+  const saved = captureWorkspace();
   let result;
   try { result = writeWorkspace(localStorage, saved, storageKey()); }
   catch { result = { saved: false }; }
@@ -625,6 +788,8 @@ function restoreWorkspace() {
     const contourIds = new Set(artwork.contours.map(c => c.id));
     const selectedContour = contourIds.has(saved.ui.selectedContour) ? saved.ui.selectedContour : artwork.contours[0].id;
     Object.assign(state, saved.document.settings, saved.ui, { artwork, source: saved.source, name: saved.name, example: saved.example, sourceWarnings: artwork.warnings, tabLayouts: saved.document.tabLayouts, selectedContour });
+    state.hiddenContours = (saved.document.hiddenContours ?? []).filter(id => contourIds.has(id));
+    state.selectedOutlines = (saved.ui.selectedOutlines ?? []).filter(id => contourIds.has(id));
     // Controls outside the SVG are persistent DOM, so synchronize them explicitly.
     $('#filename').textContent = state.name;
     $('#show-tabs').checked = state.showTabs;
@@ -650,11 +815,14 @@ function restoreWorkspace() {
     return true;
   } catch { return false; }
 }
-function flushWorkspace() {
+function commitWorkspaceEdits() {
   const active = document.activeElement;
   if (active instanceof HTMLInputElement && active.type === 'number') active.dispatchEvent(new Event('change', { bubbles: true }));
   if (drag) finishDrag({ pointerId: drag.pointerId });
   commitSettings();
+}
+function flushWorkspace() {
+  commitWorkspaceEdits();
   saveWorkspace();
 }
 window.addEventListener('stencil:before-reload', flushWorkspace);

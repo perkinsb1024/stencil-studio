@@ -29,12 +29,14 @@ function slice(contour, from, to) {
 
 export function generateStencil(contours, options) {
   const { channelWidth, tabCount, tabLayouts = {} } = options;
+  const hidden = new Set(options.hiddenContours ?? []);
   const ribbons = [], bridges = [], warnings = [];
   let reducedTabs = false;
   for (const [index, contour] of contours.entries()) {
+    const contourId = contour.id ?? `outline-${index}`;
+    if (hidden.has(contourId)) continue;
     const { length, closed } = contour;
     if (length < 0.01) continue;
-    const contourId = contour.id ?? `outline-${index}`;
     const layout = tabLayouts[contourId];
     const tabs = resolveTabs(contour, options, layout);
     if (!layout) reducedTabs ||= tabs.length < tabCount || tabs.some(t => t.width < t.requestedWidth - 1e-7);

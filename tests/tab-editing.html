@@ -28,6 +28,7 @@ async function placeTabOnSelectedOutline() {
   const p = path.getPointAtLength(path.getTotalLength() * 0.11).matrixTransform($('#preview-svg').getScreenCTM());
   pointer('pointerdown', $('#preview-svg'), p);
   await settle();
+  await click('#add-tab');
 }
 const markers = () => [...d.querySelectorAll('.tab-marker')];
 const own = () => markers().filter(m => m.dataset.outline === $('#outline-picker').value);
@@ -131,15 +132,39 @@ await check('Numeric position changes only the selected tab and undo restores it
   await click('#undo'); const restored = own().find(m => m.dataset.tab === id);
   assert(JSON.stringify(point(restored)) === JSON.stringify(before));
 });
-await check('Add mode previews and inserts a tab on the clicked outline', async () => {
+await check('Add mode keeps placing tabs across outlines until cancelled, with readable active styling', async () => {
   const before = markers().length;
   await click('#add-tab');
+  const active = w.getComputedStyle($('#add-tab'));
+  assert(active.color === 'rgb(255, 255, 255)' && active.backgroundColor === 'rgb(80, 44, 108)', 'Active button text has insufficient contrast');
+  for (const [index, fraction] of [[0, 0.31], [0, 0.44], [1, 0.62]]) {
+    const path = d.querySelectorAll('.outline-hit-targets path')[index];
+    const p = path.getPointAtLength(path.getTotalLength() * fraction).matrixTransform($('#preview-svg').getScreenCTM());
+    pointer('pointermove', $('#preview-svg'), p); assert($('#tab-ghost'));
+    pointer('pointerdown', $('#preview-svg'), p); await settle();
+    assert($('#add-tab').getAttribute('aria-pressed') === 'true' && $('#add-tab').textContent === 'Done adding');
+    assert($('#tab-ghost'), 'Placement preview disappeared after adding a tab');
+  }
+  assert(markers().length === before + 3);
+  await click('#undo');
+  assert(markers().length === before + 2 && $('#add-tab').getAttribute('aria-pressed') === 'true', 'Undo should remove only the last placement and keep add mode active');
+  await click('#redo');
+  assert(markers().length === before + 3 && $('#add-tab').getAttribute('aria-pressed') === 'true');
+  await click('#add-tab');
+  assert($('#add-tab').getAttribute('aria-pressed') === 'false' && !$('#tab-ghost'));
+  await click('#undo'); assert(markers().length === before + 2, 'Undo should remove only the last placement');
+  await click('#redo'); assert(markers().length === before + 3);
+});
+await check('Escape stops adding from a form field and removes the placement preview', async () => {
+  await click('#add-tab');
   const path = $('.outline-hit-targets path');
-  const p = path.getPointAtLength(path.getTotalLength() * 0.31).matrixTransform($('#preview-svg').getScreenCTM());
-  $('#preview-svg').dispatchEvent(new w.PointerEvent('pointermove', { clientX: p.x, clientY: p.y, bubbles: true }));
-  assert($('#tab-ghost'));
-  $('#preview-svg').dispatchEvent(new w.PointerEvent('pointerdown', { clientX: p.x, clientY: p.y, button: 0, bubbles: true }));
-  await settle(); assert(markers().length === before + 1); assert($('#add-tab').getAttribute('aria-pressed') === 'false');
+  const p = path.getPointAtLength(path.getTotalLength() * 0.21).matrixTransform($('#preview-svg').getScreenCTM());
+  pointer('pointermove', $('#preview-svg'), p); assert($('#tab-ghost'));
+  const before = markers().length;
+  $('#selected-tab-width').focus();
+  $('#selected-tab-width').dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); await settle();
+  assert($('#add-tab').getAttribute('aria-pressed') === 'false' && !$('#tab-ghost'));
+  assert(!$('#preview-svg').classList.contains('adding-tab') && markers().length === before);
 });
 await check('Slider changes undo as one action', async () => {
   const before = $('#tabWidth').value;
