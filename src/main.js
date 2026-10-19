@@ -52,7 +52,16 @@ document.querySelector('#app').innerHTML = `
       <section class="preview-panel" aria-label="Stencil preview">
         <div class="preview-toolbar"><div class="preview-heading"><span class="live-dot"></span><h2>Live preview</h2></div><div class="view-switch" role="group" aria-label="Preview mode"><button id="material-view" class="active" aria-pressed="true">Stencil</button><button id="cut-view" aria-pressed="false">Cut paths</button></div></div>
         <div class="preview-options"><label class="check-label"><input type="checkbox" id="show-tabs" checked /><span>Highlight tabs</span><span class="swatch amber"></span></label><label class="check-label"><input type="checkbox" id="show-original" /><span>Original outline</span></label><span class="preview-units">UNITS: MM</span></div>
-        <div class="canvas-area" id="canvas-area"><div class="canvas-corner top-left"></div><div class="canvas-corner bottom-right"></div><div class="sheet-wrap" id="sheet-wrap"><svg id="preview-svg" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Generated stencil with cut channels and retaining tabs"></svg><div class="dimension-width" id="dimension-width">150 mm</div><div class="dimension-height" id="dimension-height">150 mm</div></div><div class="canvas-label"><span class="status-dot"></span> LIVE VECTOR PREVIEW</div><div class="zoom-controls"><button id="zoom-out" aria-label="Zoom out">${icon('minus')}</button><span id="zoom-label">100%</span><button id="zoom-in" aria-label="Zoom in">${icon('plus')}</button><span class="zoom-divider"></span><button id="zoom-fit" title="Fit to view" aria-label="Fit to view">${icon('fit')}</button></div></div>
+        <div class="canvas-area" id="canvas-area">
+          <div class="canvas-viewport" id="canvas-viewport">
+            <div class="canvas-corner top-left"></div><div class="canvas-corner bottom-right"></div>
+            <div class="sheet-wrap" id="sheet-wrap"><svg id="preview-svg" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Generated stencil with cut channels and retaining tabs"></svg><div class="dimension-width" id="dimension-width">150 mm</div><div class="dimension-height" id="dimension-height">150 mm</div></div>
+          </div>
+          <div class="canvas-bottom-bar">
+            <div class="canvas-label"><span class="status-dot"></span> LIVE VECTOR PREVIEW</div>
+            <div class="zoom-controls"><button id="zoom-out" aria-label="Zoom out">${icon('minus')}</button><span id="zoom-label">100%</span><button id="zoom-in" aria-label="Zoom in">${icon('plus')}</button><span class="zoom-divider"></span><button id="zoom-fit" title="Fit to view" aria-label="Fit to view">${icon('fit')}</button></div>
+          </div>
+        </div>
         <div class="preview-footer"><div class="legend"><span><i class="legend-cut"></i> Cut away</span><span><i class="legend-material"></i> Keep material</span><span><i class="legend-tab"></i> Retaining tab</span></div><span id="cut-count">8 cut regions</span></div>
       </section>
     </div>
@@ -94,7 +103,7 @@ function render() {
 
 function fitSheet() {
   if (!state.scaled) return;
-  const area = $('#canvas-area');
+  const area = $('#canvas-viewport');
   const ratio = state.scaled.width / state.scaled.height;
   const height = Math.max(100, Math.min(area.clientHeight - 104, (area.clientWidth - 140) / ratio));
   const wrap = $('#sheet-wrap');
@@ -173,6 +182,6 @@ $('#download').addEventListener('click', () => {
 $('#help').addEventListener('click', () => $('#help-dialog').showModal());
 for (const id of ['close-help', 'got-it']) $(`#${id}`).addEventListener('click', () => $('#help-dialog').close());
 $('#help-dialog').addEventListener('click', e => { if (e.target === $('#help-dialog')) { const r = e.target.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) e.target.close(); } });
-new ResizeObserver(fitSheet).observe($('#canvas-area'));
+new ResizeObserver(fitSheet).observe($('#canvas-viewport'));
 updateRangePaint();
 loadSource(examples.bloom.svg, examples.bloom.name, 'bloom');
