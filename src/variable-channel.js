@@ -52,10 +52,38 @@ function samplePath(points, profile) {
   return sampled;
 }
 
-export function channelPaths(points, closed, profile) {
-  const sampled = samplePath(points, profile);
+export function channelPaths(points, closed, profile, caps = {}) {
+  let sampled = samplePath(points, profile);
+  const rounded = !closed && (caps.start || caps.end);
+  let startDepth = 0, endDepth = 0;
+  if (rounded && sampled.length > 1) {
+    const cumulative = [0];
+    for (let i = 1; i < sampled.length; i++) cumulative.push(cumulative.at(-1) + Math.hypot(sampled[i].x - sampled[i - 1].x, sampled[i].y - sampled[i - 1].y));
+    const length = cumulative.at(-1);
+    function at(d) {
+      let i = 1;
+      while (i < sampled.length - 1 && cumulative[i] < d) i++;
+      const a = sampled[i - 1], b = sampled[i], t = (d - cumulative[i - 1]) / (cumulative[i] - cumulative[i - 1]);
+      return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, width: a.width + (b.width - a.width) * t };
+    }
+    function depth(end) {
+      // Inset the cap so rounding preserves the retaining gap. Compress its
+      // length on tiny cuts rather than letting opposite caps consume the tab.
+      let lo = 0, hi = length / 3;
+      for (let i = 0; i < 32; i++) {
+        const mid = (lo + hi) / 2;
+        if (mid < at(end ? length - mid : mid).width / 2) lo = mid;
+        else hi = mid;
+      }
+      return (lo + hi) / 2;
+    }
+    startDepth = caps.start ? depth(false) : 0;
+    endDepth = caps.end ? depth(true) : 0;
+    const first = at(startDepth), last = at(length - endDepth);
+    sampled = [first, ...sampled.filter((_, i) => cumulative[i] > startDepth + 1e-9 && cumulative[i] < length - endDepth - 1e-9), last];
+  }
   const [minWidth, maxWidth] = sampled.reduce(([min, max], p) => [Math.min(min, p.width), Math.max(max, p.width)], [Infinity, -Infinity]);
-  if (maxWidth - minWidth < 1e-7) {
+  if (!rounded && maxWidth - minWidth < 1e-7) {
     const offset = new ClipperLib.ClipperOffset(2, SCALE * 0.015);
     offset.AddPath((closed ? points.slice(0, -1) : points).map(p => ({ X: Math.round(p.x * SCALE), Y: Math.round(p.y * SCALE) })), ClipperLib.JoinType.jtRound, closed ? ClipperLib.EndType.etClosedLine : ClipperLib.EndType.etOpenButt);
     const solution = new ClipperLib.Paths();
@@ -91,6 +119,17 @@ export function channelPaths(points, closed, profile) {
   }
   for (let i = 1; i < sampled.length - 1; i++) join(sampled[i], directions[i - 1], directions[i]);
   if (closed) join(sampled[0], directions.at(-1), directions[0]);
-  // The segment ends stay square. Adding disks here would intrude into tab gaps.
+  function cap(point, direction, depth) {
+    const radius = point.width / 2;
+    const count = Math.max(8, Math.ceil(Math.PI / (2 * Math.acos(Math.max(-1, 1 - 0.015 / Math.max(radius, depth))))));
+    const normal = { x: -direction.y, y: direction.x };
+    add(Array.from({ length: count + 1 }, (_, i) => {
+      const angle = -Math.PI / 2 + Math.PI * i / count;
+      return { x: point.x + direction.x * Math.cos(angle) * depth + normal.x * Math.sin(angle) * radius,
+        y: point.y + direction.y * Math.cos(angle) * depth + normal.y * Math.sin(angle) * radius };
+    }));
+  }
+  if (startDepth) cap(sampled[0], { x: -directions[0].x, y: -directions[0].y }, startDepth);
+  if (endDepth) cap(sampled.at(-1), directions.at(-1), endDepth);
   return paths;
 }

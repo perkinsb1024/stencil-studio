@@ -99,3 +99,15 @@ test('regions saved before adjustable tapers still load alongside new regions an
   writeWorkspace(store, saved);
   assert.deepEqual(readWorkspace(store), saved);
 });
+
+test('rounded tab setting survives storage and validates mixed old/new history', () => {
+  const store = storage();
+  const rounded = { ...document, settings: { ...document.settings, roundedTabs: true } };
+  const saved = { ...workspace, document: rounded, history: { past: [document], future: [rounded] } };
+  writeWorkspace(store, saved);
+  assert.deepEqual(readWorkspace(store), saved);
+  for (const roundedTabs of ['true', 1, null]) {
+    store.setItem(workspaceKey, JSON.stringify({ ...saved, document: { ...document, settings: { ...document.settings, roundedTabs } } }));
+    assert.equal(readWorkspace(store), null);
+  }
+});

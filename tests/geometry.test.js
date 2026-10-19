@@ -423,3 +423,33 @@ test('explicit regional taper lengths control the exported transition while pres
     assert.equal(insideCuts(result, { x: 30 - taperLength, y: 53.99 }), 1);
   }
 });
+
+test('rounded tab caps curve inward while preserving the gap and open endpoints', () => {
+  const line = measureContour([{ x: 10, y: 10 }, { x: 110, y: 10 }], false);
+  const settings = { ...options, tabCount: 1 };
+  const squareEnds = generateStencil([line], settings);
+  const rounded = generateStencil([line], { ...settings, roundedTabs: true });
+  assert.equal(rounded.paths.length, 2);
+  for (const x of [58.1, 60, 61.9]) assert.equal(insideCuts(rounded, { x, y: 10 }), 0);
+  for (const x of [57.9, 62.1]) assert.equal(insideCuts(rounded, { x, y: 10 }), 1);
+  assert.equal(insideCuts(squareEnds, { x: 57.9, y: 10.9 }), 1);
+  assert.equal(insideCuts(rounded, { x: 57.9, y: 10.9 }), 0);
+  assert.equal(insideCuts(rounded, { x: 10.1, y: 10.9 }), 1);
+  assert.equal(insideCuts(rounded, { x: 109.9, y: 10.9 }), 1);
+  assert.match(exportSvg(rounded, 120, 20), /Z/);
+});
+
+test('rounded caps support seams, very short cuts and width regions', () => {
+  for (const contour of [square, measureContour([{ x: 0, y: 0 }, { x: 0.4, y: 0 }], false)]) {
+    const result = generateStencil([contour], { ...options, tabOffset: 50, roundedTabs: true });
+    assert.ok(result.paths.length > 0);
+    assert.ok(result.paths.flat().every(p => Number.isFinite(p.x) && Number.isFinite(p.y)));
+    for (const bridge of result.bridges) assert.equal(insideCuts(result, bridge.point), 0);
+  }
+  const line = measureContour([{ x: 10, y: 10 }, { x: 110, y: 10 }], false);
+  const rounded = generateStencil([line], { ...options, tabCount: 1, roundedTabs: true, regions: [{ id: 'region-test', contourId: null, width: 4, taperLength: 5, points: [{ x: 55, y: 5 }, { x: 65, y: 5 }, { x: 65, y: 15 }, { x: 55, y: 15 }] }] });
+  assert.equal(rounded.paths.length, 2);
+  assert.equal(insideCuts(rounded, { x: 57.9, y: 10 }), 1);
+  assert.equal(insideCuts(rounded, { x: 57.9, y: 11.9 }), 0);
+  assert.equal(insideCuts(rounded, { x: 60, y: 10 }), 0);
+});

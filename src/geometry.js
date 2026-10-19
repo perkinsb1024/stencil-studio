@@ -79,13 +79,13 @@ export function generateStencil(contours, options) {
     let cursor = 0;
     for (const [start, end] of gaps) { if (start > cursor + 1e-7) intervals.push([cursor, start]); cursor = Math.max(cursor, end); }
     if (cursor < length - 1e-7) intervals.push([cursor, length]);
-    let pieces = intervals.map(([from, to]) => slice(contour, from, to));
+    let pieces = intervals.map(([from, to]) => ({ points: slice(contour, from, to), start: closed || from > 0, end: closed || to < length }));
     if (closed && intervals.length > 1 && intervals[0][0] === 0 && intervals.at(-1)[1] === length) {
       const first = pieces.shift(), last = pieces.pop();
-      pieces.push([...last, ...first.slice(1)]);
+      pieces.push({ points: [...last.points, ...first.points.slice(1)], start: last.start, end: first.end });
     }
     const profile = createChannelWidthProfile(contourId, options);
-    for (const points of pieces) ribbons.push(...channelPaths(points, closed && !tabs.length, profile));
+    for (const piece of pieces) ribbons.push(...channelPaths(piece.points, closed && !tabs.length, profile, options.roundedTabs ? piece : {}));
   }
   const clipper = new ClipperLib.Clipper();
   clipper.AddPaths(ribbons, ClipperLib.PolyType.ptSubject, true);

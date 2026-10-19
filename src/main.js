@@ -23,7 +23,7 @@ const icons = {
   eye: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
 };
 const icon = (name, cls = '') => `<svg class="icon ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] || ''}</svg>`;
-const defaults = { artworkWidth: 150, channelWidth: 1.5, tabWidth: 3, tabCount: 4, tabOffset: 0, margin: 8 };
+const defaults = { artworkWidth: 150, channelWidth: 1.5, tabWidth: 3, tabCount: 4, tabOffset: 0, margin: 8, roundedTabs: false };
 const state = { ...defaults, artwork: null, source: null, example: '', name: 'Bloom.svg', view: 'material', showTabs: true, showOriginal: false, zoom: 1, sourceWarnings: [], result: null, scaled: null, tabLayouts: {}, hiddenContours: [], cutawayContours: [], regions: [], editingRegions: false, selectedRegion: null, drawingRegion: false, regionDraft: [], regionWidth: 0.8, regionTaperLength: 5, regionScope: 'outline-0', editingOutlines: false, selectedOutlines: [], showHiddenOutlines: true, editing: false, adding: false, selectedContour: null, selectedTab: null, selectedTabs: [], selectCurrentOutlineOnly: true };
 const $ = s => document.querySelector(s);
 const outlineThumbnails = new WeakMap();
@@ -51,6 +51,7 @@ document.querySelector('#app').innerHTML = `
           <div class="control"><div class="control-label"><label for="tabCount">Automatic tabs per outline</label><div class="stepper"><button id="tabs-minus" aria-label="Fewer tabs">${icon('minus')}</button><input type="number" id="tabCount" min="1" max="24" step="1" value="4" /><button id="tabs-plus" aria-label="More tabs">${icon('plus')}</button></div></div></div>
           <div class="control position-control"><div class="control-label"><label for="tabOffset">Automatic tab position</label><output id="offset-value">0%</output></div><input type="range" id="tabOffset" min="0" max="100" step="1" value="0" aria-label="Automatic tab position" /><p class="control-hint">Slide automatic tabs around closed outlines.</p></div>
           <p class="control-hint" id="automatic-scope"></p>
+          <div class="control"><label class="check-label"><input type="checkbox" id="roundedTabs" /><span>Rounded tab ends</span></label><p class="control-hint">Round the cut-channel ends beside tabs, keeping the tab gap.</p></div>
           <button class="small-button" id="reset-all-tabs" disabled>Reset all to automatic</button>
 
         </section>
@@ -699,7 +700,7 @@ function snapshot() {
 }
 function restore(saved) {
   cancelAnimationFrame(renderFrame); pendingSettings = null; positionGesture = null;
-  Object.assign(state, saved.settings); state.tabLayouts = structuredClone(saved.tabLayouts);
+  Object.assign(state, defaults, saved.settings); state.tabLayouts = structuredClone(saved.tabLayouts);
   state.hiddenContours = [...(saved.hiddenContours ?? [])];
   state.cutawayContours = [...(saved.cutawayContours ?? [])];
   state.regions = structuredClone(saved.regions ?? []);
@@ -719,7 +720,10 @@ function mutate(action) {
 function scheduleRender() { cancelAnimationFrame(renderFrame); renderFrame = requestAnimationFrame(render); }
 function syncSettingInputs() {
   for (const key of Object.keys(defaults)) {
-    if ($(`#${key}`)) $(`#${key}`).value = state[key];
+    if ($(`#${key}`)) {
+      if ($(`#${key}`).type === 'checkbox') $(`#${key}`).checked = state[key];
+      else $(`#${key}`).value = state[key];
+    }
     if ($(`#${key}-range`)) $(`#${key}-range`).value = state[key];
   }
   updateRangePaint();
@@ -741,6 +745,7 @@ for (const key of ['artworkWidth', 'channelWidth', 'tabWidth', 'tabCount', 'tabO
   slider?.addEventListener('input', e => syncControl(key, e.target.value, true));
 }
 function updateRangePaint() { document.querySelectorAll('input[type="range"]').forEach(el => el.style.setProperty('--range', `${(el.value - el.min) / (el.max - el.min) * 100}%`)); }
+$('#roundedTabs').addEventListener('change', e => mutate(() => { state.roundedTabs = e.target.checked; }));
 $('#tabs-minus').addEventListener('click', () => syncControl('tabCount', state.tabCount - 1));
 $('#tabs-plus').addEventListener('click', () => syncControl('tabCount', state.tabCount + 1));
 $('#reset').addEventListener('click', () => { mutate(() => { Object.assign(state, defaults); state.tabLayouts = {}; state.selectedTab = null; syncSettingInputs(); }); notify('Stencil settings and tabs reset. Undo is available.'); });

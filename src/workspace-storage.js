@@ -12,6 +12,7 @@ const ranges = { artworkWidth: [10, 1000], channelWidth: [0.2, 12], tabWidth: [0
 function validSnapshot(value) {
   return isObject(value) && (value.regions === undefined || validRegions(value.regions)) && ['hiddenContours', 'cutawayContours'].every(key => value[key] === undefined || isContourList(value[key])) && isObject(value.settings) && Object.entries(ranges).every(([key, [min, max]]) =>
     Number.isFinite(value.settings[key]) && value.settings[key] >= min && value.settings[key] <= max) &&
+    (value.settings.roundedTabs === undefined || typeof value.settings.roundedTabs === 'boolean') &&
     Number.isInteger(value.settings.tabCount) && isObject(value.tabLayouts) && Object.entries(value.tabLayouts).every(([id, tabs]) =>
       isContour(id) && Array.isArray(tabs) && tabs.every(tab => isObject(tab) && isTab(tab.id) && Number.isFinite(tab.position) &&
         tab.position >= 0 && tab.position <= 1 && (tab.widthOverride === null || Number.isFinite(tab.widthOverride) && tab.widthOverride >= 0.5 && tab.widthOverride <= 15)));
