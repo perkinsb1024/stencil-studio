@@ -1,4 +1,6 @@
 import { resolveTabs } from './tab-layout.js';
+import { channelWidthAt, createChannelWidthProfile } from './regions.js';
+import { channelPaths } from './variable-channel.js';
 
 const ClipperLib = globalThis.ClipperLib;
 
@@ -28,15 +30,25 @@ function slice(contour, from, to) {
 }
 
 export function generateStencil(contours, options) {
-  const { channelWidth, tabCount, tabLayouts = {} } = options;
+  const { tabCount, tabLayouts = {} } = options;
   const hidden = new Set(options.hiddenContours ?? []);
+  const cutaways = new Set(options.cutawayContours ?? []);
   const ribbons = [], bridges = [], warnings = [];
-  let reducedTabs = false;
+  let reducedTabs = false, hasCutaways = false;
   for (const [index, contour] of contours.entries()) {
     const contourId = contour.id ?? `outline-${index}`;
     if (hidden.has(contourId)) continue;
     const { length, closed } = contour;
     if (length < 0.01) continue;
+    if (closed && cutaways.has(contourId)) {
+      // Remove the enclosed area at the original boundary, without an offset
+      // or retaining gaps. Normalize winding before unioning cuts.
+      const polygon = contour.points.slice(0, -1).map(p => ({ X: Math.round(p.x * SCALE), Y: Math.round(p.y * SCALE) }));
+      if (!ClipperLib.Clipper.Orientation(polygon)) polygon.reverse();
+      ribbons.push(polygon);
+      hasCutaways = true;
+      continue;
+    }
     const layout = tabLayouts[contourId];
     const tabs = resolveTabs(contour, options, layout);
     if (!layout) reducedTabs ||= tabs.length < tabCount || tabs.some(t => t.width < t.requestedWidth - 1e-7);
@@ -72,13 +84,8 @@ export function generateStencil(contours, options) {
       const first = pieces.shift(), last = pieces.pop();
       pieces.push([...last, ...first.slice(1)]);
     }
-    for (const points of pieces) {
-      const offset = new ClipperLib.ClipperOffset(2, SCALE * 0.015);
-      offset.AddPath((closed && !tabs.length ? points.slice(0, -1) : points).map(p => ({ X: Math.round(p.x * SCALE), Y: Math.round(p.y * SCALE) })), ClipperLib.JoinType.jtRound, closed && !tabs.length ? ClipperLib.EndType.etClosedLine : ClipperLib.EndType.etOpenButt);
-      const solution = new ClipperLib.Paths();
-      offset.Execute(solution, channelWidth / 2 * SCALE);
-      ribbons.push(...solution);
-    }
+    const profile = createChannelWidthProfile(contourId, options);
+    for (const points of pieces) ribbons.push(...channelPaths(points, closed && !tabs.length, profile));
   }
   const clipper = new ClipperLib.Clipper();
   clipper.AddPaths(ribbons, ClipperLib.PolyType.ptSubject, true);
@@ -92,7 +99,8 @@ export function generateStencil(contours, options) {
     const locations = result.map(poly => ClipperLib.Clipper.PointInPolygon(point, poly));
     return locations.includes(-1) || locations.filter(location => location === 1).length % 2 === 1;
   });
-  if (damaged.length) warnings.push(`${damaged.length} tab${damaged.length === 1 ? '' : 's'} intersect another channel. Try a narrower channel or change tab position; inspect before cutting.`);
+  if (damaged.length) warnings.push(`${damaged.length} tab${damaged.length === 1 ? '' : 's'} intersect another channel${hasCutaways ? ' or full cut-away' : ''}. Try a narrower channel or change tab position; inspect before cutting.`);
+  for (const bridge of bridges) bridge.channelWidth = channelWidthAt(bridge.point, bridge.contourId, options);
   return { paths, bridges, warnings };
 }
 
@@ -103,5 +111,5 @@ export function pathData(points, close = true) {
 
 export function exportSvg(result, width, height, title = 'Stencil') {
   const safeTitle = title.replace(/[<>&"']/g, '');
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${num(width)}mm" height="${num(height)}mm" viewBox="0 0 ${num(width)} ${num(height)}">\n<title>${safeTitle}</title>\n<desc>Closed cut paths for outline channels. Gaps between channels are retaining tabs. Black areas are removed; white material remains. No outer sheet cut is included.</desc>\n<path fill="#000000" fill-rule="evenodd" stroke="none" d="${result.paths.map(p => pathData(p)).join('')}"/>\n</svg>`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${num(width)}mm" height="${num(height)}mm" viewBox="0 0 ${num(width)} ${num(height)}">\n<title>${safeTitle}</title>\n<desc>Closed cut paths for outline channels and full cut-aways. Gaps between channels are retaining tabs. Black areas are removed; white material remains. No outer sheet cut is included.</desc>\n<path fill="#000000" fill-rule="evenodd" stroke="none" d="${result.paths.map(p => pathData(p)).join('')}"/>\n</svg>`;
 }

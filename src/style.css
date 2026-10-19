@@ -291,7 +291,9 @@ dialog{padding:27px}
 .outline-select span{line-height:1.5}
 .outline-select small{display:block;color:#81738c;font-size:11px;font-weight:400}
 .outline-row.is-hidden .outline-select svg{opacity:.5}
+.outline-row .cutaway-toggle{font-size:11px}
 .outline-row .check-label{color:#655175;flex-shrink:0;min-height:36px}
+@media(max-width:600px){.outline-row{flex-wrap:wrap;column-gap:16px}.outline-row .outline-select{flex-basis:100%}.outline-row .check-label{min-height:28px}}
 .outline-select:focus-visible,.visibility-outline:focus-visible{outline:2px solid #826b94;outline-offset:2px}
 .outline-select:focus-visible{outline-offset:-2px}
 .editing-outlines .visibility-outline{cursor:pointer}
@@ -391,12 +393,50 @@ select{
 
 /* Keep the active mode immediately above its panel on narrow previews. */
 @media(max-width:520px){
-  .tab-edit-toolbar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  .tab-edit-toolbar{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
   .tab-edit-toolbar .edit-spacer{display:none}
   #undo,#redo{grid-row:1}
-  #edit-outlines,#edit-tabs{grid-row:2}
-  /* The mode buttons share two equal columns. Use those column centers so
+  #redo{grid-column:3}
+  #edit-outlines,#edit-tabs,#edit-regions{grid-row:2}
+  /* The mode buttons share three equal columns. Use those column centers so
      carets track narrow viewports immediately, before resize callbacks run. */
-  .outline-inspector::before{left:calc(25% - 10px)}
-  .tab-inspector::before{left:calc(75% - 4px)}
+  .outline-inspector::before{left:calc(16.6667% - 11px)}
+  .tab-inspector::before{left:calc(50% - 7px)}
+  .region-inspector::before{left:calc(83.3333% - 3px)}
 }
+
+/* Width regions stay separate from the exported cut geometry. */
+.region-fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;margin-bottom:12px}
+.region-fields>div{min-width:0}
+.region-picker-field,.region-scope-field{grid-column:1/-1}
+.region-fields label{display:block;font-size:11px;color:#80718d;margin-bottom:5px;line-height:1.5}
+.region-fields input[type=number],.region-fields select{width:100%;min-height:34px;border:1px solid #d8cfe0;border-radius:5px;background-color:#fff;color:#655175;padding:6px 36px 6px 8px;font:inherit;font-size:12px}
+.region-fields input[type=number]{padding-right:8px}
+.region-width-control{margin:0}
+.region-actions{display:flex;gap:8px;flex-wrap:wrap;border-top:1px solid #ded3e7;padding-top:10px}
+#region-count{font-size:12px;color:#776880}
+.editing-regions{touch-action:none}
+.width-region path{fill:#218c83;fill-opacity:.08;stroke:#258477;stroke-width:1.5;stroke-dasharray:5 3;cursor:move}
+.width-region.selected path{fill-opacity:.14;stroke:#117569;stroke-width:2;stroke-dasharray:none}
+.width-region text{fill:#176c63;paint-order:stroke;stroke:#fffef9;stroke-width:.6;stroke-linejoin:round}
+.width-region circle{fill:#fffef9;stroke:#117569;stroke-width:2;cursor:grab}
+.width-region circle:active{cursor:grabbing}
+.width-region [tabindex]:focus-visible{outline:none;stroke:#ff2da6;stroke-width:3}
+.region-draft path{fill:#218c83;fill-opacity:.1;stroke:#258477;stroke-width:1.5;stroke-dasharray:5 3}
+.region-draft circle{fill:#fffef9;stroke:#258477;stroke-width:2}
+.drawing-region,.drawing-region .width-region path{cursor:crosshair}
+.drawing-region .width-region{pointer-events:none;opacity:.45}
+@media(max-width:520px){.region-actions .small-button{flex:1 1 40%}.tab-edit-toolbar .small-button{padding:7px 4px}}
+
+.region-scope-picker{display:flex;align-items:center;gap:6px;min-width:0}
+.region-scope-picker select{flex:1;min-width:0;width:0}
+.region-scope-picker .small-button{flex-shrink:0;min-height:34px}
+.picking-region-layer,.picking-region-layer .region-layer-target{cursor:crosshair}
+.picking-region-layer .width-region,.picking-region-layer .region-draft,.picking-region-layer .tab-markers{pointer-events:none}
+.region-layer-guide{fill:none;stroke:#258477;stroke-width:1.5;stroke-dasharray:4 3;pointer-events:none;opacity:.65}
+.region-layer-hit{fill:none;stroke:transparent;pointer-events:stroke}
+.region-layer-target.hovered .region-layer-guide,.region-layer-target:focus-visible .region-layer-guide{stroke:#ff2da6;stroke-width:3;stroke-dasharray:none;opacity:1}
+.region-layer-target:focus-visible{outline:none}
+
+/* Keep the SVG viewport as the click target throughout a drawing gesture. */
+.drawing-region>*{pointer-events:none}

@@ -1,0 +1,255 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Region editing checks</title>
+<style>body{font:14px system-ui;padding:24px;color:#502c6c}li{margin:8px 0}.fail{color:#a00}iframe{width:1100px;height:1700px;border:1px solid #ddd}#summary{font-weight:bold}</style>
+<h1>Region editing checks</h1><p id="summary">Running…</p><ol id="results"></ol><iframe title="Region editor under test" src="about:blank"></iframe>
+<script type="module">
+const frame = document.querySelector('iframe'), key = 'stencil-studio.workspace.v1:region-editing-tests';
+localStorage.removeItem(key);
+let d, w;
+const $ = selector => d.querySelector(selector);
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+function assert(value, message = 'Unexpected result') { if (!value) throw new Error(message); }
+async function check(name, action) {
+  const li = document.createElement('li');
+  try { await action(); li.textContent = `PASS — ${name}`; }
+  catch (error) { li.textContent = `FAIL — ${name}: ${error.message}`; li.className = 'fail'; }
+  document.querySelector('#results').append(li);
+}
+async function load(action) {
+  await new Promise(resolve => { frame.addEventListener('load', resolve, { once: true }); action(); });
+  d = frame.contentDocument; w = frame.contentWindow;
+  w.requestAnimationFrame = callback => w.setTimeout(() => callback(w.performance.now()), 16);
+  w.cancelAnimationFrame = id => w.clearTimeout(id);
+  await sleep(50);
+}
+async function click(selector) { $(selector).click(); await sleep(40); }
+async function change(selector, value) { $(selector).value = value; $(selector).dispatchEvent(new w.Event('change', { bubbles: true })); await sleep(40); }
+function flush() { w.dispatchEvent(new w.Event('stencil:before-reload')); }
+function saved() { flush(); return JSON.parse(localStorage.getItem(key)); }
+const cuts = () => $('.cut-shape').getAttribute('d');
+const inside = (x, y) => $('.cut-shape').isPointInFill(new w.DOMPoint(x, y));
+function client(x, y) { return new w.DOMPoint(x, y).matrixTransform($('#preview-svg').getScreenCTM()); }
+async function corner(x, y) {
+  const point = client(x, y);
+  $('#preview-svg').dispatchEvent(new w.MouseEvent('click', { bubbles: true, clientX: point.x, clientY: point.y, detail: 1 })); await sleep(30);
+}
+function pointer(type, target, x, y, pointerId = 1) {
+  const point = client(x, y);
+  target.dispatchEvent(new w.PointerEvent(type, { bubbles: true, pointerId, button: 0, buttons: type === 'pointerup' ? 0 : 1, clientX: point.x, clientY: point.y }));
+}
+async function polygon(points, close = true) {
+  await click('#draw-region');
+  for (const [x, y] of points) await corner(x, y);
+  if (close) await click('#finish-region');
+}
+function caret(panelId, buttonId) {
+  const panel = $(panelId), button = $(buttonId).getBoundingClientRect();
+  const style = w.getComputedStyle(panel, '::before');
+  const x = panel.getBoundingClientRect().left + parseFloat(w.getComputedStyle(panel).borderLeftWidth) + parseFloat(style.left) + parseFloat(style.width) / 2;
+  assert(Math.abs(x - (button.left + button.width / 2)) <= 3, `Caret is not aligned at ${w.innerWidth}px`);
+  assert(button.bottom <= panel.getBoundingClientRect().top);
+}
+await load(() => { frame.src = '/?workspace=region-editing-tests&live-reload=off'; });
+await check('Edit regions is a separate mode above a stable canvas with a layer and width selector', async () => {
+  const source = '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 20H100"/><path d="M0 50H100"/></svg>';
+  const transfer = new w.DataTransfer(); transfer.items.add(new w.File([source], 'regions.svg', { type: 'image/svg+xml' }));
+  $('#file-input').files = transfer.files; $('#file-input').dispatchEvent(new w.Event('change'));
+  for (let i = 0; i < 50 && $('#filename').textContent !== 'regions.svg'; i++) await sleep(20);
+  await change('#channelWidth', 8); await change('#tabCount', 1);
+  const before = $('#preview-svg').getBoundingClientRect();
+  await click('#edit-tabs'); await click('#edit-regions');
+  assert(!$('#region-inspector').hidden && $('#tab-inspector').hidden && $('#outline-inspector').hidden);
+  assert($('#edit-regions').getAttribute('aria-pressed') === 'true');
+  assert($('#region-scope').options.length === 3 && $('#region-scope').value === 'outline-0');
+  assert(Math.abs(before.width - $('#preview-svg').getBoundingClientRect().width) < 1);
+  assert($('#region-inspector').getBoundingClientRect().bottom <= $('#canvas-area').getBoundingClientRect().top);
+  caret('#region-inspector', '#edit-regions');
+});
+let originalCuts, firstId;
+await check('Drawing a polygon narrows one outline, keeps the other wide and undoes as one step', async () => {
+  originalCuts = cuts(); assert(inside(50, 11) && inside(50, 56));
+  const slider = $('#region-width-range'); slider.value = 1;
+  slider.dispatchEvent(new w.Event('input', { bubbles: true }));
+  slider.dispatchEvent(new w.Event('change', { bubbles: true }));
+  assert($('#region-width').value === '1');
+  await polygon([[28, 2], [72, 2], [72, 62], [28, 62]]);
+  const doc = saved().document; firstId = doc.regions[0].id;
+  assert(doc.regions.length === 1 && doc.regions[0].contourId === 'outline-0');
+  assert(!inside(50, 11) && inside(50, 56) && inside(100, 11));
+  assert(d.querySelectorAll('[data-region-vertex]').length === 4);
+  const narrowed = cuts(); await click('#undo'); assert(cuts() === originalCuts && saved().document.regions.length === 0);
+  await click('#redo'); assert(cuts() === narrowed && saved().document.regions.length === 1);
+  await change('#region-picker', firstId);
+});
+await check('Width and all-layer scope changes affect existing regions and support undo', async () => {
+  const points = JSON.stringify(saved().document.regions[0].points);
+  await click('#select-region-layer');
+  assert($('#select-region-layer').getAttribute('aria-pressed') === 'true');
+  assert(d.querySelectorAll('[data-region-layer]').length === 2);
+  await corner(50, 30); assert($('#select-region-layer').getAttribute('aria-pressed') === 'true', 'Empty space selected a layer');
+  pointer('pointermove', $('#preview-svg'), 50, 53);
+  assert($('[data-region-layer="outline-1"]').classList.contains('hovered'));
+  pointer('pointerdown', $('[data-region-layer="outline-1"]'), 50, 53);
+  pointer('pointerup', $('#preview-svg'), 50, 53);
+  await corner(50, 53);
+  assert($('#region-scope').value === 'outline-1' && saved().document.regions[0].contourId === 'outline-1');
+  assert(inside(50, 11) && !inside(50, 56), 'Picked scope did not update the stencil');
+  assert(JSON.stringify(saved().document.regions[0].points) === points, 'Picking a layer moved the region');
+  assert($('#select-region-layer').getAttribute('aria-pressed') === 'false' && !$('.region-layer-targets'));
+  await click('#undo'); assert($('#region-scope').value === 'outline-0');
+  await click('#select-region-layer');
+  $('#select-region-layer').dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert(!$('.region-layer-targets') && $('#region-scope').value === 'outline-0');
+  await click('#select-region-layer');
+  $('[data-region-layer="outline-0"]').dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  assert($('#region-scope').value === 'outline-0' && !$('.region-layer-targets'));
+  await change('#region-scope', 'all'); assert(!inside(50, 56));
+  for (const width of [2, 3, 4]) {
+    $('#region-width-range').value = width;
+    $('#region-width-range').dispatchEvent(new w.Event('input', { bubbles: true })); await sleep(30);
+    assert(Number($('#region-width').value) === width, 'Slider and number field are out of sync');
+    assert(inside(50, 53 + width / 2 - 0.1) && !inside(50, 53 + width / 2 + 0.1), 'Slider did not update geometry live');
+  }
+  $('#region-width-range').dispatchEvent(new w.Event('change', { bubbles: true }));
+  await click('#undo'); assert($('#region-width').value === '1' && $('#region-width-range').value === '1' && !inside(50, 54.9));
+  await click('#undo'); assert($('#region-scope').value === 'outline-0' && inside(50, 56));
+  await click('#redo'); await click('#redo');
+});
+await check('Per-region taper sliders update cuts live, group undo and preserve independent values', async () => {
+  const original = Number($('#region-taper-length').value), before = cuts();
+  for (const value of [8, 10, 12]) {
+    $('#region-taper-length-range').value = value;
+    $('#region-taper-length-range').dispatchEvent(new w.Event('input', { bubbles: true })); await sleep(30);
+    assert(Number($('#region-taper-length').value) === value);
+  }
+  assert(cuts() !== before, 'Taper did not change geometry');
+  $('#region-taper-length-range').dispatchEvent(new w.Event('change', { bubbles: true }));
+  assert(saved().document.regions[0].taperLength === 12, 'Taper was not saved');
+  await click('#undo'); assert(Number($('#region-taper-length').value) === original && cuts() === before);
+  await click('#redo'); assert($('#region-taper-length').value === '12.0');
+  await change('#region-taper-length', 1.9000000000000004);
+  assert($('#region-taper-length').value === '1.9' && saved().document.regions[0].taperLength === 1.9, 'Taper must round to one decimal');
+  await change('#region-taper-length', 3); assert($('#region-taper-length-range').value === '3');
+  await polygon([[90, 2], [110, 2], [110, 62], [90, 62]]);
+  await change('#region-taper-length', 18);
+  await change('#region-picker', firstId); assert($('#region-taper-length').value === '3.0');
+  const secondId = saved().document.regions[1].id;
+  await change('#region-picker', secondId); assert($('#region-taper-length').value === '18.0');
+  await click('#remove-region'); await change('#region-picker', firstId);
+});
+await check('Dragging a corner and moving a whole polygon record one undo step per gesture', async () => {
+  const before = saved().document.regions[0].points;
+  pointer('pointerdown', $('[data-region-vertex="0"]'), 28, 2);
+  pointer('pointermove', $('#preview-svg'), 30, 3); pointer('pointermove', $('#preview-svg'), 32, 4);
+  pointer('pointerup', $('#preview-svg'), 32, 4); await sleep(30);
+  assert(JSON.stringify(saved().document.regions[0].points) !== JSON.stringify(before));
+  await click('#undo'); assert(JSON.stringify(saved().document.regions[0].points) === JSON.stringify(before));
+  await change('#region-picker', firstId);
+  pointer('pointerdown', $('.width-region path'), 50, 30);
+  pointer('pointermove', $('#preview-svg'), 55, 30); pointer('pointermove', $('#preview-svg'), 60, 30);
+  pointer('pointerup', $('#preview-svg'), 60, 30); await sleep(30);
+  const moved = saved().document.regions[0].points;
+  assert(Math.abs(moved[0].x - before[0].x - 10 / 150) < 1e-8);
+  await click('#undo'); assert(JSON.stringify(saved().document.regions[0].points) === JSON.stringify(before));
+  await change('#region-picker', firstId);
+});
+await check('Keyboard corner movement, cancellation and invalid polygon rejection work', async () => {
+  const before = JSON.stringify(saved().document.regions[0].points);
+  const vertex = $('[data-region-vertex="0"]'); vertex.focus();
+  vertex.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); await sleep(30);
+  assert(JSON.stringify(saved().document.regions[0].points) !== before);
+  await click('#undo'); await change('#region-picker', firstId);
+  pointer('pointerdown', $('[data-region-vertex="0"]'), 28, 2);
+  pointer('pointermove', $('#preview-svg'), 32, 4);
+  $('#preview-svg').dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert(JSON.stringify(saved().document.regions[0].points) === before);
+  await polygon([[30, 5], [70, 60], [70, 5], [30, 60]]);
+  assert(saved().document.regions.length === 1 && !$('#cancel-region').hidden, 'Crossed polygon accepted');
+  await click('#cancel-region');
+  await polygon([[30, 5], [70, 5]], false);
+  $('#preview-svg').dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Backspace', bubbles: true }));
+  assert(saved().ui.regionDraft.length === 1);
+  $('#preview-svg').dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert($('#cancel-region').hidden && saved().document.regions.length === 1);
+  await polygon([[30, 5], [70, 5]], false);
+  const final = client(60, 30);
+  $('#preview-svg').dispatchEvent(new w.MouseEvent('dblclick', { bubbles: true, clientX: final.x, clientY: final.y, detail: 2, cancelable: true }));
+  assert(saved().document.regions.length === 2 && saved().document.regions[1].points.length === 3, 'Double-click did not add and finish the third corner');
+  await click('#undo'); assert(saved().document.regions.length === 1);
+});
+await check('Later regions override overlaps; removing a region restores the earlier width', async () => {
+  await change('#region-scope', 'all'); await change('#region-width', 1);
+  await polygon([[40, 2], [65, 2], [65, 62], [40, 62]]);
+  assert(saved().document.regions.length === 2 && !inside(50, 54.9));
+  await change('#region-width', 2); assert($('#region-width-range').value === '2' && inside(50, 53.9) && !inside(50, 54.1));
+  await click('#remove-region'); assert(saved().document.regions.length === 1 && inside(50, 54.9));
+  await click('#undo'); assert(saved().document.regions.length === 2);
+});
+await check('Regions, undo history and unfinished polygons recover after reload', async () => {
+  const before = cuts(), regions = saved().document.regions;
+  await polygon([[15, 1], [25, 1]], false); saved();
+  await load(() => w.location.reload());
+  assert(!$('#region-inspector').hidden && !$('#cancel-region').hidden);
+  assert(saved().ui.regionDraft.length === 2 && cuts() === before);
+  assert(JSON.stringify(saved().document.regions) === JSON.stringify(regions));
+  await corner(25, 20); await corner(15, 20);
+  const final = client(15.8, 20.1);
+  $('#preview-svg').dispatchEvent(new w.MouseEvent('click', { bubbles: true, clientX: final.x, clientY: final.y, detail: 2 }));
+  const completion = new w.MouseEvent('dblclick', { bubbles: true, clientX: final.x, clientY: final.y, detail: 2, cancelable: true });
+  const placed = new w.DOMPoint(completion.clientX, completion.clientY).matrixTransform($('#preview-svg').getScreenCTM().inverse());
+  $('#preview-svg').dispatchEvent(completion);
+  const completed = saved().document.regions;
+  assert(completed.length === 3, 'Double-click did not finish polygon');
+  assert(completed[2].points.length === 4, 'Double-click duplicated the final corner');
+  assert(Math.abs(completed[2].points.at(-1).x - (placed.x - 8) / 150) < 1e-8, 'Final double-click location was lost');
+  await click('#undo'); assert(saved().document.regions.length === 2 && cuts() === before);
+  await click('#redo'); assert(saved().document.regions.length === 3);
+});
+await check('Regions scale with artwork, preserve millimeter widths, export cuts and session data', async () => {
+  const regions = saved().document.regions;
+  await change('#artworkWidth', 300);
+  assert(JSON.stringify(saved().document.regions) === JSON.stringify(regions));
+  assert($('#region-width').value === String(regions.at(-1).width));
+  let blob;
+  const create = w.URL.createObjectURL, anchorClick = w.HTMLAnchorElement.prototype.click;
+  w.URL.createObjectURL = value => { blob = value; return 'blob:region-test'; };
+  w.HTMLAnchorElement.prototype.click = function() {};
+  try {
+    await click('#download'); const output = await blob.text();
+    const svg = new w.DOMParser().parseFromString(output, 'image/svg+xml');
+    assert(svg.querySelector('path').getAttribute('d') === cuts());
+    assert(!output.includes('data-region') && !output.includes('region-overlays'));
+    await click('#export-session'); const session = JSON.parse(await blob.text());
+    assert(session.document.regions.length === 3 && session.history.past.some(doc => doc.regions.length === 2));
+  } finally { w.URL.createObjectURL = create; w.HTMLAnchorElement.prototype.click = anchorClick; }
+  await click('#edit-tabs'); assert(!$('.region-overlays'));
+  await click('#edit-outlines'); assert(!$('.region-overlays'));
+  await click('#edit-regions'); assert($('.region-overlays'));
+});
+await check('Region controls and all mode carets fit mobile and tablet layouts', async () => {
+  for (const width of [390, 860]) {
+    frame.style.width = `${width}px`; frame.getBoundingClientRect(); await sleep(80);
+    saved(); await load(() => w.location.reload());
+    assert(d.documentElement.scrollWidth <= width, `Overflow at ${width}px`);
+    caret('#region-inspector', '#edit-regions');
+    const region = $('#region-picker').getBoundingClientRect(), scope = $('#region-scope').getBoundingClientRect();
+    const widthControl = $('#region-width-range').getBoundingClientRect(), taperControl = $('#region-taper-length-range').getBoundingClientRect();
+    assert(region.bottom < scope.top && scope.bottom < widthControl.top, 'Dropdowns are not stacked above sliders');
+    assert(Math.abs(widthControl.top - taperControl.top) < 1 && widthControl.right < taperControl.left, 'Sliders are not side by side');
+    const panel = $('#region-inspector').getBoundingClientRect();
+    for (const control of $('#region-inspector').querySelectorAll('select, input, button:not([hidden])')) {
+      const bounds = control.getBoundingClientRect();
+      assert(bounds.left >= panel.left && bounds.right <= panel.right, `Region control overflows at ${width}px`);
+    }
+    await click('#edit-tabs'); caret('#tab-inspector', '#edit-tabs');
+    await click('#edit-outlines'); caret('#outline-inspector', '#edit-outlines');
+    await click('#edit-regions');
+  }
+});
+await check('Settings resets preserve regions and new artwork clears them', async () => {
+  await click('#reset'); assert(saved().document.regions.length === 3);
+  await click('[data-example="arch"]'); assert(saved().document.regions.length === 0);
+  assert($('#region-count').textContent === '0 regions' && $('#undo').disabled);
+});
+const failures = document.querySelectorAll('.fail').length;
+document.querySelector('#summary').textContent = `${document.querySelectorAll('li:not(.fail)').length} passed; ${failures} failed.`;
+</script></html>

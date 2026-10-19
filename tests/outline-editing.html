@@ -196,6 +196,70 @@ await check('Detailed thumbnails preserve corners next to densely sampled sectio
     assert(samples.some(p => Math.hypot(p.x - x, p.y - y) < 0.5), `Thumbnail skipped corner ${x}, ${y}`);
   }
 });
+await check('Full cut-away toggle removes width and tabs, supports undo, and restores custom layouts', async () => {
+  frame.style.width = '1100px'; await sleep(80);
+  await click('#edit-tabs'); await change('#tab-picker', 'auto-0'); await change('#selected-tab-width', 7);
+  const channels = cuts(); flush();
+  const layout = JSON.parse(localStorage.getItem(key)).document.tabLayouts['outline-0'];
+  await click('#edit-outlines'); await click('#cutaway-outline-0');
+  assert($('#cutaway-outline-0').checked && cuts() !== channels);
+  assert((cuts().match(/Z/g) || []).length === 1, 'Cut-away must have one boundary');
+  assert($('#edit-tabs').disabled && !$('#download').disabled, 'All-cut-away artwork remains downloadable');
+  const cutaway = cuts();
+  await click('#undo'); assert(!$('#cutaway-outline-0').checked && cuts() === channels);
+  await click('#redo'); assert($('#cutaway-outline-0').checked && cuts() === cutaway);
+  await click('#visible-outline-0'); assert(cuts() === '' && $('#download').disabled);
+  await click('#visible-outline-0'); assert(cuts() === cutaway);
+  await click('#cutaway-outline-0'); assert(cuts() === channels);
+  await click('#edit-tabs'); await change('#tab-picker', 'auto-0');
+  assert($('#selected-tab-width').value === '7'); flush();
+  assert(JSON.stringify(JSON.parse(localStorage.getItem(key)).document.tabLayouts['outline-0']) === JSON.stringify(layout));
+  await click('#edit-outlines'); await click('#cutaway-outline-0');
+});
+await check('Cut-away boundary and session export survive reload with undo history', async () => {
+  const before = cuts(); flush();
+  await load(() => w.location.reload());
+  assert($('#cutaway-outline-0').checked && cuts() === before);
+  await click('#undo'); assert(!$('#cutaway-outline-0').checked);
+  await click('#redo'); assert($('#cutaway-outline-0').checked && cuts() === before);
+  let blob;
+  const create = w.URL.createObjectURL, anchorClick = w.HTMLAnchorElement.prototype.click;
+  w.URL.createObjectURL = value => { blob = value; return 'blob:cutaway-test'; };
+  w.HTMLAnchorElement.prototype.click = function() {};
+  try {
+    await click('#download');
+    const svg = new w.DOMParser().parseFromString(await blob.text(), 'image/svg+xml');
+    assert(svg.querySelector('path').getAttribute('d') === before);
+    assert((before.match(/Z/g) || []).length === 1);
+    await click('#export-session');
+    const session = JSON.parse(await blob.text());
+    assert(session.document.cutawayContours.join() === 'outline-0');
+    assert(session.history.past.some(doc => doc.cutawayContours.length === 0));
+  } finally { w.URL.createObjectURL = create; w.HTMLAnchorElement.prototype.click = anchorClick; }
+  await change('#channelWidth', 10); assert(cuts() === before, 'Channel width changed the full cut-away');
+  await click('#reset'); assert($('#cutaway-outline-0').checked);
+});
+await check('Open outlines keep channels, cut-aways stay out of tab editing, and rows fit mobile', async () => {
+  const source = '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0H100V100H0Z"/><path d="M0 120H100"/></svg>';
+  const transfer = new w.DataTransfer(); transfer.items.add(new w.File([source], 'cutaway.svg', { type: 'image/svg+xml' }));
+  $('#file-input').files = transfer.files; $('#file-input').dispatchEvent(new w.Event('change'));
+  for (let i = 0; i < 50 && $('#filename').textContent !== 'cutaway.svg'; i++) await sleep(20);
+  assert(!$('#cutaway-outline-0').checked && $('#cutaway-outline-1').disabled);
+  await click('#cutaway-outline-0'); await click('#edit-tabs');
+  assert($('#outline-picker').options.length === 1 && $('#outline-picker').value === 'outline-1');
+  assert(!d.querySelector('.outline-hit-targets [data-outline="outline-0"]'));
+  assert(markers().every(m => m.dataset.outline === 'outline-1'));
+  await click('#edit-outlines');
+  for (const width of [390, 860]) {
+    frame.style.width = `${width}px`; frame.getBoundingClientRect(); await sleep(80);
+    assert(d.documentElement.scrollWidth <= width, `Overflow at ${width}px`);
+    const row = $('.outline-row').getBoundingClientRect();
+    for (const control of $('.outline-row').querySelectorAll('button, label')) {
+      const bounds = control.getBoundingClientRect();
+      assert(bounds.left >= row.left && bounds.right <= row.right + 1, `Control overflows outline row at ${width}px`);
+    }
+  }
+});
 const failures = document.querySelectorAll('.fail').length;
 document.querySelector('#summary').textContent = `${document.querySelectorAll('li:not(.fail)').length} passed; ${failures} failed.`;
 </script></html>

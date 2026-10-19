@@ -1,11 +1,16 @@
+import { validPolygon } from './regions.js';
+
 export const workspaceKey = 'stencil-studio.workspace.v1';
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const isContour = value => typeof value === 'string' && /^outline-\d+$/.test(value);
 const isContourList = value => Array.isArray(value) && value.length <= 500 && value.every(isContour) && new Set(value).size === value.length;
 const isTab = value => typeof value === 'string' && /^(auto-\d+|tab-[a-zA-Z0-9-]+)$/.test(value);
+const isRegion = value => typeof value === 'string' && /^region-[a-zA-Z0-9-]+$/.test(value);
+const validRegions = value => Array.isArray(value) && value.length <= 100 && new Set(value.map(r => r?.id)).size === value.length && value.every(r =>
+  isObject(r) && isRegion(r.id) && (r.contourId === null || isContour(r.contourId)) && Number.isFinite(r.width) && r.width >= 0.2 && r.width <= 12 && (r.taperLength === undefined || Number.isFinite(r.taperLength) && r.taperLength >= 0.1 && r.taperLength <= 50) && validPolygon(r.points));
 const ranges = { artworkWidth: [10, 1000], channelWidth: [0.2, 12], tabWidth: [0.5, 15], tabCount: [1, 24], tabOffset: [0, 100], margin: [0, 100] };
 function validSnapshot(value) {
-  return isObject(value) && (value.hiddenContours === undefined || isContourList(value.hiddenContours)) && isObject(value.settings) && Object.entries(ranges).every(([key, [min, max]]) =>
+  return isObject(value) && (value.regions === undefined || validRegions(value.regions)) && ['hiddenContours', 'cutawayContours'].every(key => value[key] === undefined || isContourList(value[key])) && isObject(value.settings) && Object.entries(ranges).every(([key, [min, max]]) =>
     Number.isFinite(value.settings[key]) && value.settings[key] >= min && value.settings[key] <= max) &&
     Number.isInteger(value.settings.tabCount) && isObject(value.tabLayouts) && Object.entries(value.tabLayouts).every(([id, tabs]) =>
       isContour(id) && Array.isArray(tabs) && tabs.every(tab => isObject(tab) && isTab(tab.id) && Number.isFinite(tab.position) &&
@@ -19,8 +24,13 @@ export function readWorkspace(storage, key = workspaceKey) {
     const ui = saved.ui;
     // These optional fields preserve compatibility with workspaces and history
     // saved before outline visibility was editable.
-    if (['editingOutlines', 'showHiddenOutlines'].some(key => ui[key] !== undefined && typeof ui[key] !== 'boolean') ||
-      ui.selectedOutlines !== undefined && !isContourList(ui.selectedOutlines) || ui.editingOutlines && ui.editing) return null;
+    if (['editingOutlines', 'showHiddenOutlines', 'editingRegions', 'drawingRegion'].some(key => ui[key] !== undefined && typeof ui[key] !== 'boolean') ||
+      ui.selectedOutlines !== undefined && !isContourList(ui.selectedOutlines) || ['editing', 'editingOutlines', 'editingRegions'].filter(key => ui[key]).length > 1) return null;
+    if (ui.selectedRegion !== undefined && ui.selectedRegion !== null && !isRegion(ui.selectedRegion) ||
+      ui.regionScope !== undefined && ui.regionScope !== 'all' && !isContour(ui.regionScope) ||
+      ui.regionTaperLength !== undefined && (!Number.isFinite(ui.regionTaperLength) || ui.regionTaperLength < 0.1 || ui.regionTaperLength > 50) ||
+      ui.regionWidth !== undefined && (!Number.isFinite(ui.regionWidth) || ui.regionWidth < 0.2 || ui.regionWidth > 12) ||
+      ui.regionDraft !== undefined && (!Array.isArray(ui.regionDraft) || ui.regionDraft.length > 200 || !ui.regionDraft.every(p => isObject(p) && Number.isFinite(p.x) && Number.isFinite(p.y) && Math.abs(p.x) <= 1000 && Math.abs(p.y) <= 1000))) return null;
     if (!['material', 'cut'].includes(ui.view) || !Number.isFinite(ui.zoom) || ui.zoom < 0.25 || ui.zoom > 3 ||
       !['showTabs', 'showOriginal', 'editing', 'adding', 'selectCurrentOutlineOnly'].every(key => typeof ui[key] === 'boolean') ||
       !(ui.selectedContour === null || isContour(ui.selectedContour)) || !(ui.selectedTab === null || isTab(ui.selectedTab)) ||

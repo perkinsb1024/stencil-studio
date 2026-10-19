@@ -343,6 +343,27 @@ await check('Open-path group position stops at the endpoint without collapsing s
   const path = $('.outline-hit-targets path'), end = path.getPointAtLength(path.getTotalLength());
   assert(Math.hypot(after.at(-1)[0] - end.x, after.at(-1)[1] - end.y) < 0.001);
 });
+await check('Delete removes selected tabs after focus leaves the SVG and preserves typing in fields', async () => {
+  await change('#tab-picker', markers()[0].dataset.tab);
+  const before = markers().length;
+  $('#selected-tab-width').focus();
+  const typing = new w.KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true });
+  $('#selected-tab-width').dispatchEvent(typing);
+  assert(!typing.defaultPrevented && markers().length === before, 'Delete was intercepted while typing');
+  d.body.focus();
+  d.body.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }));
+  assert(markers().length === before - 1, 'Selected tab was not removed without marker focus');
+  await click('#undo'); assert(markers().length === before);
+  await change('#tab-picker', markers()[0].dataset.tab);
+  $('#tab-picker').focus();
+  $('#tab-picker').dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true }));
+  assert(markers().length === before - 1, 'Picker focus prevented deleting the selected tab');
+  await click('#undo'); assert(markers().length === before);
+  selectAllTabs();
+  d.body.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }));
+  assert(markers().length === 0, 'Delete did not remove the selected group');
+  await click('#undo'); assert(markers().length === before);
+});
 const failures = document.querySelectorAll('.fail').length;
 document.querySelector('#summary').textContent = `${document.querySelectorAll('li:not(.fail)').length} passed; ${failures} failed.`;
 </script></html>

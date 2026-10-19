@@ -1,3 +1,5 @@
+import { scaleRegions } from './regions.js';
+import { createRegionEditor } from './region-editor.js';
 import { importSvg, scaleArtwork, examples } from './import-svg.js';
 import { generateStencil, pathData, exportSvg } from './geometry.js';
 import { customizeContour, nearestOnContour } from './tab-layout.js';
@@ -22,7 +24,7 @@ const icons = {
 };
 const icon = (name, cls = '') => `<svg class="icon ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] || ''}</svg>`;
 const defaults = { artworkWidth: 150, channelWidth: 1.5, tabWidth: 3, tabCount: 4, tabOffset: 0, margin: 8 };
-const state = { ...defaults, artwork: null, source: null, example: '', name: 'Bloom.svg', view: 'material', showTabs: true, showOriginal: false, zoom: 1, sourceWarnings: [], result: null, scaled: null, tabLayouts: {}, hiddenContours: [], editingOutlines: false, selectedOutlines: [], showHiddenOutlines: true, editing: false, adding: false, selectedContour: null, selectedTab: null, selectedTabs: [], selectCurrentOutlineOnly: true };
+const state = { ...defaults, artwork: null, source: null, example: '', name: 'Bloom.svg', view: 'material', showTabs: true, showOriginal: false, zoom: 1, sourceWarnings: [], result: null, scaled: null, tabLayouts: {}, hiddenContours: [], cutawayContours: [], regions: [], editingRegions: false, selectedRegion: null, drawingRegion: false, regionDraft: [], regionWidth: 0.8, regionTaperLength: 5, regionScope: 'outline-0', editingOutlines: false, selectedOutlines: [], showHiddenOutlines: true, editing: false, adding: false, selectedContour: null, selectedTab: null, selectedTabs: [], selectCurrentOutlineOnly: true };
 const $ = s => document.querySelector(s);
 const outlineThumbnails = new WeakMap();
 
@@ -61,13 +63,14 @@ document.querySelector('#app').innerHTML = `
         <div class="tab-edit-toolbar" role="group" aria-label="Editing mode">
           <button id="edit-outlines" class="small-button" aria-pressed="false" aria-controls="outline-inspector" aria-expanded="false">Edit outlines</button>
           <button id="edit-tabs" class="small-button" aria-pressed="false" aria-controls="tab-inspector" aria-expanded="false">Edit tabs</button>
+          <button id="edit-regions" class="small-button" aria-pressed="false" aria-controls="region-inspector" aria-expanded="false">Edit regions</button>
           <span class="edit-spacer"></span>
           <button id="undo" class="small-button" aria-label="Undo last change" title="Undo (⌘/Ctrl Z)" disabled>Undo</button>
           <button id="redo" class="small-button" aria-label="Redo last change" title="Redo (⌘/Ctrl Shift Z)" disabled>Redo</button>
         </div>
-        <section class="outline-inspector editing-panel" id="outline-inspector" aria-label="Outline visibility editor" hidden>
-          <div class="tab-inspector-heading"><strong>Outline visibility</strong><span id="outline-count" role="status"></span></div>
-          <p class="edit-hint">Select an outline in the preview or list; Shift selects several. Uncheck Visible or choose Hide selected to leave it out of the stencil and download. Your tab edits are preserved.</p>
+        <section class="outline-inspector editing-panel" id="outline-inspector" aria-label="Outline editor" hidden>
+          <div class="tab-inspector-heading"><strong>Outline settings</strong><span id="outline-count" role="status"></span></div>
+          <p class="edit-hint">Select an outline in the preview or list; Shift selects several. Uncheck Visible or choose Hide selected to leave it out of the stencil and download. Enable Full cut-away on a closed outline to remove its entire interior along a single boundary, with no channel width or tabs. Your tab edits are preserved.</p>
           <div class="outline-actions"><button id="hide-outlines" class="small-button" disabled>Hide selected</button><button id="show-outlines" class="small-button" disabled>Show selected</button><button id="keep-only-outlines" class="small-button" disabled>Show only selected</button><button id="show-all-outlines" class="small-button" disabled>Show all outlines</button></div>
           <label class="check-label hidden-outline-toggle"><input type="checkbox" id="show-hidden-outlines" checked /><span>Show hidden outlines as dashed guides</span></label>
           <div id="outline-list" class="outline-list" role="group" aria-label="Outlines"></div>
@@ -96,6 +99,18 @@ document.querySelector('#app').innerHTML = `
           <div class="outline-actions"><button id="inherit-tab-width" class="small-button" disabled>Use default width</button><button id="remove-tab" class="small-button danger" disabled>Remove selected tab</button><button id="add-tab" class="small-button" aria-pressed="false" hidden>Add tab</button><button id="reset-outline" class="small-button" title="Clears this outline’s custom positions and width overrides. Undo is available.">Reset outline to automatic</button></div>
           <p class="control-hint" id="outline-mode-hint"></p>
         </section>
+        <section class="region-inspector editing-panel" id="region-inspector" aria-label="Channel width regions" hidden>
+          <div class="tab-inspector-heading"><strong>Channel width regions</strong><span id="region-count" role="status"></span></div>
+          <p class="edit-hint" id="region-hint" role="status"></p>
+          <div class="region-fields">
+            <div class="region-picker-field"><label for="region-picker">Region · later regions override earlier ones</label><select id="region-picker" aria-label="Select region"></select></div>
+            <div class="region-scope-field"><label for="region-scope">Apply to</label><div class="region-scope-picker"><select id="region-scope" aria-label="Region layers"></select><button id="select-region-layer" class="small-button" aria-pressed="false" aria-describedby="region-hint">Select</button></div></div>
+            <div class="control region-width-control"><label for="region-width">Channel width (mm)</label><input id="region-width" type="number" min="0.2" max="12" step="0.1" value="0.8" /><input id="region-width-range" type="range" min="0.2" max="12" step="0.1" value="0.8" aria-label="Region channel width slider" /></div>
+            <div class="control region-width-control"><label for="region-taper-length">Taper length (mm)</label><input id="region-taper-length" type="number" min="0.1" max="50" step="0.1" value="5" aria-describedby="region-taper-hint" /><input id="region-taper-length-range" type="range" min="0.1" max="50" step="0.1" value="5" aria-label="Region taper length slider" aria-describedby="region-taper-hint" /></div>
+          </div>
+          <p class="control-hint" id="region-taper-hint">Taper length sets the transition distance outside the region boundary.</p>
+          <div class="region-actions"><button id="draw-region" class="small-button">Draw polygon</button><button id="finish-region" class="small-button" hidden>Finish polygon</button><button id="cancel-region" class="small-button" hidden>Cancel drawing</button><button id="remove-region" class="small-button" disabled>Remove region</button></div>
+        </section>
         <p id="outlines-empty" class="outlines-empty" role="status" hidden>All outlines are hidden. Use Edit outlines to show them again. Nothing will be exported.</p>
         <div class="canvas-area" id="canvas-area">
           <div class="canvas-viewport" id="canvas-viewport">
@@ -112,7 +127,7 @@ document.querySelector('#app').innerHTML = `
     </div>
   </main>
   <div id="notice" class="notice" role="status" hidden></div>
-  <dialog id="help-dialog"><button id="close-help" class="icon-button dialog-close" aria-label="Close help">${icon('close')}</button><div class="eyebrow">A QUICK FIELD GUIDE</div><h2>A cut above.</h2><p>Make a reusable outline stencil in three steps.</p><ol><li><strong>Bring your vectors.</strong><span>Upload an SVG with paths or shapes. Convert text, masks, and clipping to plain paths in your drawing app first.</span></li><li><strong>Make room for the cut.</strong><span>Channel width sets the strip of material to remove along each outline. Tabs leave small uncut bridges that hold the inner pieces in place.</span></li><li><strong>Send it to your cutter.</strong><span>Download the SVG, import it into your cutter’s software, and cut the edges of the black shapes. Match the imported size to the SVG dimensions.</span></li></ol><div class="help-tip"><strong>Before the big cut</strong><p>Black areas come out; light areas stay. Amber squares mark automatic tabs; teal circles mark custom tabs. Both are preview-only. Use Edit outlines to hide or show outlines without losing their tab edits. Hidden outlines are left out of the download. Use Edit tabs to add, remove, move, or resize individual tabs. Editing makes that outline custom; automatic placement then affects only other outlines. Default width still applies unless a tab has a width override. Inspect small details and overlapping outlines, and test-cut a sample for your material. The sheet boundary is not exported as a cut.</p></div><button id="got-it" class="download-button">Got it ${icon('check')}</button></dialog>
+  <dialog id="help-dialog"><button id="close-help" class="icon-button dialog-close" aria-label="Close help">${icon('close')}</button><div class="eyebrow">A QUICK FIELD GUIDE</div><h2>A cut above.</h2><p>Make a reusable outline stencil in three steps.</p><ol><li><strong>Bring your vectors.</strong><span>Upload an SVG with paths or shapes. Convert text, masks, and clipping to plain paths in your drawing app first.</span></li><li><strong>Make room for the cut.</strong><span>Channel width sets the strip of material to remove along each outline. Tabs leave small uncut bridges that hold the inner pieces in place.</span></li><li><strong>Send it to your cutter.</strong><span>Download the SVG, import it into your cutter’s software, and cut the edges of the black shapes. Match the imported size to the SVG dimensions.</span></li></ol><div class="help-tip"><strong>Before the big cut</strong><p>Black areas come out; light areas stay. Amber squares mark automatic tabs; teal circles mark custom tabs. Both are preview-only. Use Edit outlines to hide or show outlines or enable Full cut-away on a closed outline. Full cut-aways remove the entire interior at the original boundary without channel width or tabs. Tab edits are preserved when switching back. Hidden outlines are left out of the download. Use Edit regions to draw polygons with a different channel width for one outline or all layers. Drag a region or its corners to adjust it. Use Edit tabs to add, remove, move, or resize individual tabs. Editing makes that outline custom; automatic placement then affects only other outlines. Default width still applies unless a tab has a width override. Inspect small details and overlapping outlines, and test-cut a sample for your material. The sheet boundary is not exported as a cut.</p></div><button id="got-it" class="download-button">Got it ${icon('check')}</button></dialog>
 `;
 
 let noticeTimer;
@@ -124,12 +139,14 @@ function notify(message, kind = 'success') {
 
 function render() {
   if (!state.artwork) return;
-  state.scaled = scaleArtwork(state.artwork, state.artworkWidth, Math.max(state.margin, state.channelWidth / 2 + 2));
-  state.result = generateStencil(state.scaled.contours, state);
+  const padding = Math.max(state.margin, Math.max(state.channelWidth, ...state.regions.map(r => r.width)) / 2 + 2);
+  state.scaled = { ...scaleArtwork(state.artwork, state.artworkWidth, padding), padding, regions: scaleRegions(state.regions, state.artworkWidth, padding) };
+  state.result = generateStencil(state.scaled.contours, { ...state, regions: state.scaled.regions });
   const { width, height, contours, artworkHeight } = state.scaled;
   const visible = visibleContours();
-  if (!visible.some(c => c.id === state.selectedContour)) selectTab(visible[0]?.id ?? null, null);
-  if (!visible.length) { state.editing = false; state.adding = false; }
+  const tabContours = channelContours();
+  if (!tabContours.some(c => c.id === state.selectedContour)) selectTab(tabContours[0]?.id ?? null, null);
+  if (!tabContours.length) { state.editing = false; state.adding = false; }
   // Drop selections removed by resets, undo, or changes to automatic placement.
   state.selectedTabs = state.selectedTab == null ? [] : state.selectedTabs.filter(ref => state.result.bridges.some(b => matchesTab(b, ref)));
   if (state.selectedTabs.length && !selectedBridge()) {
@@ -137,6 +154,7 @@ function render() {
   }
   updateTabEditor();
   updateOutlineEditor();
+  regionEditor.update();
   const svg = $('#preview-svg');
   svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
   svg.style.aspectRatio = `${width} / ${height}`;
@@ -144,13 +162,14 @@ function render() {
   const cuts = state.result.paths.map(p => pathData(p)).join('');
   svg.innerHTML = `<rect width="${width}" height="${height}" fill="#fffef9"/><path class="cut-shape" d="${cuts}" fill="${state.view === 'material' ? '#502c6c' : 'none'}" stroke="${state.view === 'cut' ? '#502c6c' : 'none'}" stroke-width="0.14" fill-rule="evenodd"/>`;
   if (state.showOriginal) svg.innerHTML += `<g class="original-outlines" fill="none" stroke="#6f8bca" stroke-width="0.18" stroke-dasharray="1 0.7" pointer-events="none">${visible.map(c => `<path d="${pathData(c.points, c.closed)}"/>`).join('')}</g>`;
-  if (state.editing) svg.innerHTML += `<g class="outline-hit-targets" fill="none" stroke="transparent" stroke-width="18" vector-effect="non-scaling-stroke">${visible.map(c => `<path data-outline="${c.id}" d="${pathData(c.points, c.closed)}" vector-effect="non-scaling-stroke"/>`).join('')}</g>`;
+  if (state.editing) svg.innerHTML += `<g class="outline-hit-targets" fill="none" stroke="transparent" stroke-width="18" vector-effect="non-scaling-stroke">${tabContours.map(c => `<path data-outline="${c.id}" d="${pathData(c.points, c.closed)}" vector-effect="non-scaling-stroke"/>`).join('')}</g>`;
   if (state.editing && state.selectedContour) {
     const selected = contours.find(c => c.id === state.selectedContour);
     if (selected) svg.innerHTML += `<path d="${pathData(selected.points, selected.closed)}" fill="none" stroke="#258477" stroke-width="1" stroke-dasharray="3 4" vector-effect="non-scaling-stroke" pointer-events="none" opacity="0.6"/>`;
   }
   if ((state.showTabs || state.editing) && !state.editingOutlines) svg.innerHTML += renderTabMarkers();
   if (state.editingOutlines) svg.innerHTML += renderOutlineTargets();
+  if (state.editingRegions) svg.innerHTML += regionEditor.overlay();
   svg.classList.toggle('editing-tabs', state.editing);
   svg.classList.toggle('editing-outlines', state.editingOutlines);
   svg.classList.toggle('adding-tab', state.adding);
@@ -161,6 +180,7 @@ function render() {
   $('#outlines-empty').hidden = visible.length > 0;
   $('#offset-value').textContent = `${state.tabOffset}%`;
   fitSheet();
+  updateModeCarets();
   const warnings = [...state.sourceWarnings.filter(w => w !== 'Open paths are included as channels with square ends.' || visible.some(c => !c.closed)), ...state.result.warnings];
   $('#download').disabled = state.result.paths.length === 0;
   if (warnings.length) notify(warnings.join(' '), 'warning');
@@ -168,6 +188,7 @@ function render() {
 }
 
 function visibleContours() { return state.scaled.contours.filter(c => !state.hiddenContours.includes(c.id)); }
+function channelContours() { return visibleContours().filter(c => !state.cutawayContours.includes(c.id)); }
 function outlineNumber(id) { return state.artwork.contours.findIndex(c => c.id === id) + 1; }
 function pointToMode(panelId, buttonId) {
   const panel = $(`#${panelId}`), button = $(`#${buttonId}`);
@@ -223,13 +244,14 @@ function updateOutlineEditor() {
   $('#show-all-outlines').disabled = state.hiddenContours.length === 0;
   // Retain the list DOM across unrelated renders (including viewport resizing).
   const list = $('#outline-list');
-  const key = JSON.stringify([state.hiddenContours, selected]);
+  const key = JSON.stringify([state.hiddenContours, state.cutawayContours, selected]);
   if (list.artwork !== state.artwork || list.visibilityKey !== key) {
     const focus = list.contains(document.activeElement) ? document.activeElement.id : null;
     list.innerHTML = state.artwork.contours.map(c => {
       const hidden = state.hiddenContours.includes(c.id), active = selected.includes(c.id), number = outlineNumber(c.id);
       return `<div class="outline-row ${active ? 'selected' : ''} ${hidden ? 'is-hidden' : ''}">
         <button id="select-${c.id}" class="outline-select" data-select-outline="${c.id}" aria-pressed="${active}">${outlineThumbnail(c)}<span>Outline ${number}<small>${hidden ? 'Hidden' : 'Visible'} · ${c.closed ? 'Closed' : 'Open'}</small></span></button>
+        <label class="check-label cutaway-toggle" title="${c.closed ? 'Remove the entire interior with no channel width or tabs' : 'Full cut-aways require a closed outline'}"><input id="cutaway-${c.id}" type="checkbox" data-cutaway-outline="${c.id}" aria-label="Outline ${number} full cut-away" ${state.cutawayContours.includes(c.id) ? 'checked' : ''} ${c.closed ? '' : 'disabled'} /><span>Full cut-away</span></label>
         <label class="check-label"><input id="visible-${c.id}" type="checkbox" data-visible-outline="${c.id}" aria-label="Outline ${number} visible" ${hidden ? '' : 'checked'} /><span>Visible</span></label>
       </div>`;
     }).join('');
@@ -238,6 +260,7 @@ function updateOutlineEditor() {
   }
   pointToMode('outline-inspector', 'edit-outlines');
   pointToMode('tab-inspector', 'edit-tabs');
+  pointToMode('region-inspector', 'edit-regions');
 }
 
 function fitSheet() {
@@ -299,7 +322,7 @@ function renderTabMarkers() {
     const label = `${b.custom ? 'Custom' : 'Automatic'} tab, outline ${state.scaled.contours.findIndex(c => c.id === b.contourId) + 1}, ${b.width.toFixed(1)} mm${b.widthOverride == null ? ', default width' : ', width override'}`;
     return `<g data-tab="${b.id}" data-outline="${b.contourId}" class="tab-marker ${selected ? 'selected' : ''}" ${state.editing ? `tabindex="0" role="button" aria-label="${label}" aria-pressed="${selected}"` : ''}>
       <title>${label}</title>
-      <path d="${b.segments.map(p => pathData(p, false)).join('')}" fill="none" stroke="${color}" stroke-width="${state.channelWidth + 0.65}" opacity="0.65"/>
+      <path d="${b.segments.map(p => pathData(p, false)).join('')}" fill="none" stroke="${color}" stroke-width="${b.channelWidth + 0.65}" opacity="0.65"/>
       ${b.custom ? `<circle cx="${b.point.x}" cy="${b.point.y}" r="${radius}"` : `<rect x="${b.point.x - radius}" y="${b.point.y - radius}" width="${radius * 2}" height="${radius * 2}"`} fill="${color}" stroke="#fffef9" stroke-width="1" vector-effect="non-scaling-stroke"/>
       ${selected ? `<circle cx="${b.point.x}" cy="${b.point.y}" r="${radius + screenUnit() * 4}" fill="none" stroke="#ff2da6" stroke-width="3" vector-effect="non-scaling-stroke"/>` : ''}
       ${state.editing ? `<circle cx="${b.point.x}" cy="${b.point.y}" r="${screenUnit() * 12}" fill="transparent"/>` : ''}
@@ -307,7 +330,7 @@ function renderTabMarkers() {
   }).join('')}</g>`;
 }
 function updateTabEditor() {
-  const contours = visibleContours();
+  const contours = channelContours();
   const automatic = contours.filter(c => !Object.hasOwn(state.tabLayouts, c.id)).length;
   const custom = contours.length - automatic;
   $('#automatic-scope').textContent = `Placement applies to ${automatic} automatic outline${automatic === 1 ? '' : 's'} · ${custom} custom. Default width applies unless overridden.`;
@@ -396,15 +419,20 @@ function updateSelectedTab(property, value, live = false) {
   if (live) { apply(); scheduleRender(); }
   else { mutate(apply); positionGesture = null; }
 }
+const regionEditor = createRegionEditor({ state, render, mutate, snapshot, restore, record: before => history.record(before), beginEdit: () => { if (!pendingSettings) pendingSettings = snapshot(); }, commit: commitSettings, save: queueWorkspaceSave, notify, svgPoint, screenUnit });
 function toggleEditing(mode) {
+  regionEditor.finishGesture();
   if (drag) finishDrag({ pointerId: drag.pointerId }, true);
   commitSettings(); clearGhost();
   const enabled = !state[mode];
   state.editing = mode === 'editing' && enabled;
   state.editingOutlines = mode === 'editingOutlines' && enabled;
+  state.editingRegions = mode === 'editingRegions' && enabled;
+  if (state.editingRegions && !state.selectedRegion && !state.drawingRegion) state.regionScope = state.selectedOutlines[0] ?? state.selectedContour ?? 'all';
   state.adding = false;
   render();
 }
+$('#edit-regions').addEventListener('click', () => toggleEditing('editingRegions'));
 $('#edit-tabs').addEventListener('click', () => toggleEditing('editing'));
 $('#edit-outlines').addEventListener('click', () => toggleEditing('editingOutlines'));
 $('#outline-list').addEventListener('click', e => {
@@ -412,6 +440,12 @@ $('#outline-list').addEventListener('click', e => {
   if (button) selectOutline(button.dataset.selectOutline, e.shiftKey);
 });
 $('#outline-list').addEventListener('change', e => {
+  if (e.target.matches('[data-cutaway-outline]')) mutate(() => {
+    const cutaways = new Set(state.cutawayContours);
+    if (e.target.checked) cutaways.add(e.target.dataset.cutawayOutline);
+    else cutaways.delete(e.target.dataset.cutawayOutline);
+    state.cutawayContours = state.artwork.contours.filter(c => c.closed && cutaways.has(c.id)).map(c => c.id);
+  });
   if (e.target.matches('[data-visible-outline]')) setOutlineVisibility([e.target.dataset.visibleOutline], e.target.checked);
 });
 $('#show-hidden-outlines').addEventListener('change', e => { state.showHiddenOutlines = e.target.checked; render(); });
@@ -458,7 +492,7 @@ function nearestOutline(event) {
   const point = svgPoint(event);
   if (!point) return null;
   let nearest = null;
-  for (const contour of visibleContours()) {
+  for (const contour of channelContours()) {
     const projected = nearestOnContour(contour, point);
     if (!nearest || projected.distance < nearest.distance) nearest = { ...projected, contour };
   }
@@ -596,15 +630,22 @@ $('#outline-list').addEventListener('keydown', e => {
   setOutlineVisibility(state.selectedOutlines, false);
 });
 document.addEventListener('keydown', e => {
+  if (e.defaultPrevented) return;
   if (e.key === 'Escape' && (state.adding || drag)) {
     e.preventDefault();
     if (drag) finishDrag({ pointerId: drag.pointerId }, true);
     state.adding = false; clearGhost(); render();
     return;
   }
+  if (state.editing && ['Delete', 'Backspace'].includes(e.key) && !e.metaKey && !e.ctrlKey && !e.altKey && !e.target.closest('input, textarea, [contenteditable="true"]') && selectedBridges().length) {
+    e.preventDefault();
+    if (drag) finishDrag({ pointerId: drag.pointerId });
+    removeSelectedTab();
+    return;
+  }
   if (e.target.closest('input, select, textarea, [contenteditable="true"]')) return;
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
-    e.preventDefault(); commitSettings(); if (e.shiftKey) history.redo(); else history.undo();
+    e.preventDefault(); regionEditor.finishGesture(); commitSettings(); if (e.shiftKey) history.redo(); else history.undo();
   }
 });
 
@@ -613,7 +654,7 @@ function loadSource(source, name, example = '') {
     const artwork = importSvg(source);
     cancelAnimationFrame(renderFrame);
     state.artwork = artwork; state.source = source; state.example = example; state.name = name; state.sourceWarnings = artwork.warnings; state.zoom = 1;
-    state.tabLayouts = {}; state.hiddenContours = []; state.selectedOutlines = []; state.selectedTabs = []; state.selectedContour = artwork.contours[0].id; state.selectedTab = null; state.adding = false;
+    state.tabLayouts = {}; state.hiddenContours = []; state.cutawayContours = []; state.regions = []; state.selectedRegion = null; state.drawingRegion = false; state.regionDraft = []; state.selectedOutlines = []; state.selectedTabs = []; state.selectedContour = artwork.contours[0].id; state.selectedTab = null; state.adding = false;
     history.clear(); pendingSettings = null;
     $('#filename').textContent = name;
     document.querySelectorAll('[data-example]').forEach(b => b.classList.toggle('active', b.dataset.example === example));
@@ -654,12 +695,15 @@ function createHistory() {
   };
 }
 function snapshot() {
-  return structuredClone({ settings: Object.fromEntries(Object.keys(defaults).map(key => [key, state[key]])), tabLayouts: state.tabLayouts, hiddenContours: state.hiddenContours });
+  return structuredClone({ settings: Object.fromEntries(Object.keys(defaults).map(key => [key, state[key]])), tabLayouts: state.tabLayouts, hiddenContours: state.hiddenContours, cutawayContours: state.cutawayContours, regions: state.regions });
 }
 function restore(saved) {
   cancelAnimationFrame(renderFrame); pendingSettings = null; positionGesture = null;
   Object.assign(state, saved.settings); state.tabLayouts = structuredClone(saved.tabLayouts);
   state.hiddenContours = [...(saved.hiddenContours ?? [])];
+  state.cutawayContours = [...(saved.cutawayContours ?? [])];
+  state.regions = structuredClone(saved.regions ?? []);
+  state.drawingRegion = false; state.regionDraft = [];
   state.selectedTab = null;
   syncSettingInputs(); render(); updateHistoryButtons();
 }
@@ -700,8 +744,8 @@ function updateRangePaint() { document.querySelectorAll('input[type="range"]').f
 $('#tabs-minus').addEventListener('click', () => syncControl('tabCount', state.tabCount - 1));
 $('#tabs-plus').addEventListener('click', () => syncControl('tabCount', state.tabCount + 1));
 $('#reset').addEventListener('click', () => { mutate(() => { Object.assign(state, defaults); state.tabLayouts = {}; state.selectedTab = null; syncSettingInputs(); }); notify('Stencil settings and tabs reset. Undo is available.'); });
-$('#undo').addEventListener('click', () => { commitSettings(); history.undo(); });
-$('#redo').addEventListener('click', () => history.redo());
+$('#undo').addEventListener('click', () => { regionEditor.finishGesture(); commitSettings(); history.undo(); });
+$('#redo').addEventListener('click', () => { regionEditor.finishGesture(); history.redo(); });
 $('#show-tabs').addEventListener('change', e => { state.showTabs = e.target.checked; render(); });
 $('#show-original').addEventListener('change', e => { state.showOriginal = e.target.checked; render(); });
 for (const mode of ['material', 'cut']) $(`#${mode}-view`).addEventListener('click', () => {
@@ -737,9 +781,10 @@ new ResizeObserver(scheduleRender).observe($('#canvas-viewport'));
 function updateModeCarets() {
   pointToMode('outline-inspector', 'edit-outlines');
   pointToMode('tab-inspector', 'edit-tabs');
+  pointToMode('region-inspector', 'edit-regions');
 }
 const modeObserver = new ResizeObserver(updateModeCarets);
-for (const id of ['edit-tabs', 'edit-outlines', 'tab-inspector', 'outline-inspector']) modeObserver.observe($(`#${id}`));
+for (const id of ['edit-tabs', 'edit-outlines', 'edit-regions', 'tab-inspector', 'outline-inspector', 'region-inspector']) modeObserver.observe($(`#${id}`));
 window.addEventListener('resize', updateModeCarets);
 document.fonts.ready.then(updateModeCarets);
 let workspaceSaveTimer;
@@ -758,7 +803,7 @@ function queueWorkspaceSave() {
   workspaceSaveTimer = setTimeout(saveWorkspace, 150);
 }
 function captureWorkspace() {
-  const ui = Object.fromEntries(['view', 'showTabs', 'showOriginal', 'zoom', 'editing', 'adding', 'selectedContour', 'selectedTab', 'selectedTabs', 'selectCurrentOutlineOnly', 'editingOutlines', 'selectedOutlines', 'showHiddenOutlines'].map(key => [key, state[key]]));
+  const ui = Object.fromEntries(['view', 'showTabs', 'showOriginal', 'zoom', 'editing', 'adding', 'selectedContour', 'selectedTab', 'selectedTabs', 'selectCurrentOutlineOnly', 'editingOutlines', 'selectedOutlines', 'showHiddenOutlines', 'editingRegions', 'selectedRegion', 'drawingRegion', 'regionDraft', 'regionWidth', 'regionTaperLength', 'regionScope'].map(key => [key, state[key]]));
   const viewport = $('#canvas-viewport');
   return {
     version: 1, source: state.source, name: state.name, example: state.example,
@@ -789,6 +834,8 @@ function restoreWorkspace() {
     const selectedContour = contourIds.has(saved.ui.selectedContour) ? saved.ui.selectedContour : artwork.contours[0].id;
     Object.assign(state, saved.document.settings, saved.ui, { artwork, source: saved.source, name: saved.name, example: saved.example, sourceWarnings: artwork.warnings, tabLayouts: saved.document.tabLayouts, selectedContour });
     state.hiddenContours = (saved.document.hiddenContours ?? []).filter(id => contourIds.has(id));
+    state.regions = structuredClone(saved.document.regions ?? []);
+    state.cutawayContours = (saved.document.cutawayContours ?? []).filter(id => artwork.contours.some(c => c.id === id && c.closed));
     state.selectedOutlines = (saved.ui.selectedOutlines ?? []).filter(id => contourIds.has(id));
     // Controls outside the SVG are persistent DOM, so synchronize them explicitly.
     $('#filename').textContent = state.name;
@@ -816,6 +863,7 @@ function restoreWorkspace() {
   } catch { return false; }
 }
 function commitWorkspaceEdits() {
+  regionEditor.finishGesture();
   const active = document.activeElement;
   if (active instanceof HTMLInputElement && active.type === 'number') active.dispatchEvent(new Event('change', { bubbles: true }));
   if (drag) finishDrag({ pointerId: drag.pointerId });
