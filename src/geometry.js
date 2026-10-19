@@ -1,3 +1,5 @@
+import { resolveTabs } from './tab-layout.js';
+
 const ClipperLib = globalThis.ClipperLib;
 
 const SCALE = 10000;
@@ -25,28 +27,39 @@ function slice(contour, from, to) {
   return [at(contour, from), ...contour.points.filter((_, i) => contour.cumulative[i] > from + 1e-7 && contour.cumulative[i] < to - 1e-7), at(contour, to)];
 }
 
-export function generateStencil(contours, { channelWidth, tabWidth, tabCount, tabOffset }) {
+export function generateStencil(contours, options) {
+  const { channelWidth, tabCount, tabLayouts = {} } = options;
   const ribbons = [], bridges = [], warnings = [];
   let reducedTabs = false;
-  for (const contour of contours) {
+  for (const [index, contour] of contours.entries()) {
     const { length, closed } = contour;
     if (length < 0.01) continue;
-    // Short contours get fewer tabs so a cut interval always remains.
-    const count = Math.min(tabCount, Math.max(1, Math.floor(length / (tabWidth + channelWidth * 2))));
-    reducedTabs ||= count < tabCount;
-    const gap = Math.min(tabWidth, length * 0.35 / count);
-    const step = length / count;
-    const centers = Array.from({ length: count }, (_, i) => closed
-      ? ((i + 0.5 + tabOffset / 100) * step) % length
-      : (i + 1) * length / (count + 1));
-    const gaps = [];
-    for (const center of centers) {
-      const start = center - gap / 2, end = center + gap / 2;
-      bridges.push({ point: at(contour, center), before: at(contour, Math.max(0, center - gap / 2)), after: at(contour, Math.min(length, center + gap / 2)), width: gap });
-      if (start < 0 && closed) { gaps.push([0, end], [length + start, length]); }
-      else if (end > length && closed) { gaps.push([start, length], [0, end - length]); }
-      else gaps.push([Math.max(0, start), Math.min(length, end)]);
+    const contourId = contour.id ?? `outline-${index}`;
+    const layout = tabLayouts[contourId];
+    const tabs = resolveTabs(contour, options, layout);
+    if (!layout) reducedTabs ||= tabs.length < tabCount || tabs.some(t => t.width < t.requestedWidth - 1e-7);
+    else {
+      if (!tabs.length && closed) warnings.push(`Outline ${index + 1} has no tabs; its inner piece may come loose.`);
+      for (const tab of tabs) if (tab.width < tab.requestedWidth - 1e-7) {
+        warnings.push(`Outline ${index + 1}: a requested ${tab.requestedWidth.toFixed(1)} mm tab is ${tab.width.toFixed(1)} mm to fit the outline.`);
+      }
     }
+    const gaps = [];
+    for (const tab of tabs) {
+      const { center, gapWidth: gap } = tab;
+      const start = center - gap / 2, end = center + gap / 2;
+      let segments;
+      if (start < 0 && closed) segments = [[length + start, length], [0, end]];
+      else if (end > length && closed) segments = [[start, length], [0, end - length]];
+      else segments = [[Math.max(0, start), Math.min(length, end)]];
+      gaps.push(...segments);
+      bridges.push({ ...tab, contourId, point: at(contour, center), before: at(contour, segments[0][0]), after: at(contour, segments.at(-1)[1]), segments: segments.map(([from, to]) => slice(contour, from, to)) });
+    }
+    // Report overlaps, including across a closed path's seam.
+    if (tabs.some((a, i) => tabs.slice(i + 1).some(b => {
+      const delta = Math.abs(a.center - b.center);
+      return (closed ? Math.min(delta, length - delta) : delta) < (a.gapWidth + b.gapWidth) / 2 - 1e-7;
+    }))) warnings.push(`Outline ${index + 1} has overlapping tabs; move or remove a tab to separate them.`);
     gaps.sort((a, b) => a[0] - b[0]);
     const intervals = [];
     let cursor = 0;
@@ -59,7 +72,7 @@ export function generateStencil(contours, { channelWidth, tabWidth, tabCount, ta
     }
     for (const points of pieces) {
       const offset = new ClipperLib.ClipperOffset(2, SCALE * 0.015);
-      offset.AddPath(points.map(p => ({ X: Math.round(p.x * SCALE), Y: Math.round(p.y * SCALE) })), ClipperLib.JoinType.jtRound, ClipperLib.EndType.etOpenButt);
+      offset.AddPath((closed && !tabs.length ? points.slice(0, -1) : points).map(p => ({ X: Math.round(p.x * SCALE), Y: Math.round(p.y * SCALE) })), ClipperLib.JoinType.jtRound, closed && !tabs.length ? ClipperLib.EndType.etClosedLine : ClipperLib.EndType.etOpenButt);
       const solution = new ClipperLib.Paths();
       offset.Execute(solution, channelWidth / 2 * SCALE);
       ribbons.push(...solution);
@@ -72,7 +85,11 @@ export function generateStencil(contours, { channelWidth, tabWidth, tabCount, ta
   const paths = result.map(path => path.map(p => ({ x: p.X / SCALE, y: p.Y / SCALE })));
   if (reducedTabs) warnings.push('Some small contours have fewer or narrower tabs so there is room for the channel.');
   // Nearby outlines can cut across a bridge. Detect this rather than claiming every island is supported.
-  const damaged = bridges.filter(b => result.some(poly => ClipperLib.Clipper.PointInPolygon({ X: Math.round(b.point.x * SCALE), Y: Math.round(b.point.y * SCALE) }, poly) !== 0));
+  const damaged = bridges.filter(b => {
+    const point = { X: Math.round(b.point.x * SCALE), Y: Math.round(b.point.y * SCALE) };
+    const locations = result.map(poly => ClipperLib.Clipper.PointInPolygon(point, poly));
+    return locations.includes(-1) || locations.filter(location => location === 1).length % 2 === 1;
+  });
   if (damaged.length) warnings.push(`${damaged.length} tab${damaged.length === 1 ? '' : 's'} intersect another channel. Try a narrower channel or change tab position; inspect before cutting.`);
   return { paths, bridges, warnings };
 }

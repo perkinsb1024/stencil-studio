@@ -261,3 +261,91 @@ dialog{padding:27px}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}
 }
 
+
+/* Tab editing uses both color and shape: automatic squares, custom circles. */
+.legend-custom-tab{background:#258477;border-radius:50%!important}
+.small-button{border:1px solid #d8cfe0;border-radius:5px;background:#fff;padding:7px 10px;font-size:12px;line-height:1.4;color:#655175}
+.small-button:hover:not(:disabled){background:#eee7f3;border-color:#aa92bd}
+.small-button[aria-pressed=true]{background:#502c6c;color:white;border-color:#502c6c}
+.small-button[hidden],.tab-inspector[hidden],.edit-hint[hidden],[hidden]{display:none!important}
+#reset-all-tabs{margin-top:10px}
+.tab-edit-toolbar{display:flex;align-items:center;gap:8px;padding:0 20px 12px;flex-wrap:wrap}
+.edit-spacer{flex:1}
+.edit-hint{margin:0 20px 12px;font-size:12px;line-height:1.6;color:#776880}
+.tab-inspector{flex-shrink:0;margin:0 20px 14px;padding:12px 14px;background:#f4eff8;border:1px solid #d9cce3;border-left:3px solid #826b94;border-radius:7px;color:#4d365e}
+.tab-inspector.has-selection{border-color:#b59cc7;border-left-color:#826b94;box-shadow:0 2px 8px #502c6c12}
+.tab-inspector-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px;margin-bottom:8px;min-height:24px}
+.tab-inspector-heading strong{line-height:18px}
+.tab-inspector .mode-badge{flex-shrink:0}
+.tab-pickers{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px}
+.tab-pickers>div{min-width:0}
+.tab-pickers label{display:block;font-size:11px;color:#80718d;margin-bottom:4px}
+.tab-selection-area{position:relative;height:96px}
+#selected-tab-controls{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:18px;row-gap:8px}
+.tab-inspector .control{margin:0;min-width:0}
+.tab-inspector .control-label{gap:6px}
+.tab-inspector .control-label label{font-size:12px}
+.tab-inspector .control-hint{color:#80718d;font-size:11px;line-height:16px}
+#tab-width-status{height:32px;margin:6px 0 0;overflow:auto}
+.tab-inspector>.control-hint{height:16px;margin:8px 0 0}
+.tab-inspector input[type=range]{background:linear-gradient(to right,#826b94 var(--range),#e0d6e8 var(--range))}
+.tab-inspector input[type=range]::-webkit-slider-thumb{background:#826b94;box-shadow:0 0 0 1px #826b94}
+.tab-inspector input[type=range]::-moz-range-thumb{background:#826b94}
+.tab-inspector .number-unit{background:#fff}
+.outline-actions{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;border-top:1px solid #ded3e7;padding-top:10px}
+#tab-empty-state{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;text-align:center;border:1px dashed #d1bedf;border-radius:5px;background:#ffffff66;padding:14px}
+#tab-empty-state strong{font-size:13px;font-weight:600}
+#tab-empty-state span{font-size:12px;line-height:18px;color:#80718d}
+.mode-badge{font-size:10px;padding:4px 7px;border-radius:4px;background:#fff3da;color:#8b641f}
+.mode-badge.custom{background:#e9def1;color:#65467a}
+.tab-inspector .control>label{display:block;font-size:12px;margin-bottom:6px}
+.tab-inspector select{width:100%;min-height:34px;border:1px solid #e2dde6;border-radius:5px;padding:6px;background-color:#fcfbfd;color:#655175;font:inherit;font-size:12px}
+.tab-inspector .small-button{margin:0;border-color:#d2c1df;color:#655175}
+.tab-inspector .danger{color:#9b493a;border-color:#dec5bf}
+.preview-footer{gap:12px;flex-wrap:wrap}
+#cut-count{white-space:nowrap}
+.tab-markers{pointer-events:none}
+.editing-tabs{touch-action:none}
+.editing-tabs .tab-markers{pointer-events:auto}
+.editing-tabs .tab-marker{cursor:grab;outline:none}
+.editing-tabs .tab-marker:active{cursor:grabbing}
+.editing-tabs .tab-marker:focus-visible>path{stroke:#502c6c;opacity:1}
+.outline-hit-targets>path{cursor:pointer;pointer-events:stroke}
+.adding-tab,.adding-tab .tab-marker,.adding-tab .outline-hit-targets>path{cursor:crosshair}
+.control input:disabled{opacity:.4;cursor:default}
+@media(max-width:720px){.tab-edit-toolbar{padding:0 12px 12px}.edit-hint{margin-left:15px;margin-right:15px}}
+.small-button[aria-pressed=true]:hover{background:#65407e;border-color:#65407e;color:#fff}
+@media(min-width:721px){
+  .workspace{overflow:visible}
+  .inspector{border-radius:12px 0 0 12px;overflow:hidden}
+  .preview-panel{align-self:start;border-radius:0 12px 12px 0;overflow:hidden}
+  .canvas-area{flex:none;height:clamp(480px,calc(100dvh - 240px),900px);min-height:0}
+}
+@media(max-width:720px){
+  .tab-inspector{margin:0 12px 14px;padding:12px}
+  .tab-selection-area{height:180px}
+  #selected-tab-controls{grid-template-columns:minmax(0,1fr);row-gap:12px}
+  .tab-pickers{gap:10px}
+  .tab-inspector-heading{min-height:36px}
+  .outline-actions{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .tab-inspector>.control-hint{height:48px}
+}
+
+@media(min-width:721px) and (max-width:1050px){
+  .tab-inspector-heading{min-height:36px}
+  .outline-actions{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .tab-inspector>.control-hint{height:32px}
+}
+
+/* Reserve space for the chevron instead of relying on native edge spacing. */
+select{
+  appearance:none;
+  -webkit-appearance:none;
+  padding-right:36px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='m1 1 5 5 5-5' fill='none' stroke='%237a638b' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;
+  background-position:right 12px center;
+  background-size:12px 8px;
+}
+.tab-inspector select{padding-right:36px}
+@media(forced-colors:active){select,.tab-inspector select{appearance:auto;-webkit-appearance:auto;background-image:none}}

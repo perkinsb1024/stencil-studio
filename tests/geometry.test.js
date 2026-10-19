@@ -74,3 +74,130 @@ test('export has physical millimeter dimensions and only closed cut geometry', (
   assert.ok(!svg.includes('<unsafe>'));
   assert.ok(!svg.includes('<rect'));
 });
+
+const { customizeContour, resolveTabs, nearestOnContour } = await import('../src/tab-layout.js');
+const identifiedSquare = { ...square, id: 'outline-0' };
+const tab = (id, position, widthOverride = null) => ({ id, position, widthOverride });
+
+test('custom positions and counts survive global placement and channel changes', () => {
+  const tabLayouts = {};
+  const tabs = customizeContour(tabLayouts, identifiedSquare, options);
+  tabs.splice(1, 1); tabs.push(tab('replacement', 0.36));
+  const originalPositions = tabs.map(t => t.position);
+  const result = generateStencil([identifiedSquare], { ...options, tabLayouts, tabCount: 12, tabOffset: 73, channelWidth: 3 });
+  assert.deepEqual(result.bridges.map(b => b.position), originalPositions);
+  assert.equal(result.bridges.length, 4);
+  assert.ok(result.bridges.every(b => b.custom));
+});
+
+test('default widths propagate except for individual overrides, which can be cleared', () => {
+  const tabLayouts = { 'outline-0': [tab('inherited', 0.125), tab('override', 0.375, 7)] };
+  let result = generateStencil([identifiedSquare], { ...options, tabWidth: 6, tabLayouts });
+  assert.deepEqual(result.bridges.map(b => b.width), [6, 7]);
+  assert.equal(insideCuts(result, { x: 57.1, y: 10 }), 0);
+  assert.equal(insideCuts(result, { x: 56.9, y: 10 }), 1);
+  tabLayouts['outline-0'][1].widthOverride = null;
+  result = generateStencil([identifiedSquare], { ...options, tabWidth: 6, tabLayouts });
+  assert.deepEqual(result.bridges.map(b => b.width), [6, 6]);
+});
+
+test('mixed custom and automatic outlines retain independent behavior', () => {
+  const second = { ...measureContour([{ x: 200, y: 10 }, { x: 300, y: 10 }], false), id: 'outline-1' };
+  const result = generateStencil([identifiedSquare, second], { ...options, tabCount: 2, tabLayouts: { 'outline-0': [tab('custom', 0.1)] } });
+  assert.equal(result.bridges.filter(b => b.contourId === 'outline-0').length, 1);
+  assert.equal(result.bridges.filter(b => b.contourId === 'outline-1').length, 2);
+  assert.equal(result.bridges[0].custom, true);
+  assert.equal(result.bridges[1].custom, false);
+});
+
+test('resizing preserves proportional custom locations and millimeter widths', () => {
+  const scaled = { ...measureContour(identifiedSquare.points.map(p => ({ x: p.x * 2, y: p.y * 2 })), true), id: 'outline-0' };
+  const opts = { ...options, tabLayouts: { 'outline-0': [tab('custom', 0.125, 5)] } };
+  const first = generateStencil([identifiedSquare], opts).bridges[0];
+  const second = generateStencil([scaled], opts).bridges[0];
+  assert.equal(second.point.x, first.point.x * 2);
+  assert.equal(second.point.y, first.point.y * 2);
+  assert.equal(second.width, 5);
+});
+
+test('custom tabs crossing a closed seam highlight both sides and remove the cut', () => {
+  const result = generateStencil([identifiedSquare], { ...options, tabLayouts: { 'outline-0': [tab('seam', 0, 6)] } });
+  assert.equal(result.bridges[0].segments.length, 2);
+  assert.equal(insideCuts(result, { x: 10, y: 12 }), 0);
+  assert.equal(insideCuts(result, { x: 12, y: 10 }), 0);
+  assert.equal(insideCuts(result, { x: 14, y: 10 }), 1);
+  assert.equal(result.paths.length, 1);
+});
+
+test('removing the last closed-outline tab produces a continuous ring and warning', () => {
+  const result = generateStencil([identifiedSquare], { ...options, tabLayouts: { 'outline-0': [] } });
+  assert.equal(result.bridges.length, 0);
+  assert.equal(insideCuts(result, { x: 10, y: 10 }), 1);
+  assert.equal(insideCuts(result, { x: 60, y: 60 }), 0);
+  assert.equal(insideCuts(result, { x: 60, y: 10 }), 1);
+  assert.ok(result.warnings.some(w => w.includes('no tabs')));
+  const svg = exportSvg(result, 120, 120);
+  assert.equal((svg.match(/Z/g) || []).length, 2);
+});
+
+test('open outlines can have no tabs and endpoint tabs report actual clipped widths', () => {
+  const line = { ...measureContour([{ x: 10, y: 10 }, { x: 110, y: 10 }], false), id: 'outline-0' };
+  const result = generateStencil([line], { ...options, tabLayouts: { 'outline-0': [] } });
+  assert.equal(result.paths.length, 1);
+  assert.equal(result.warnings.length, 0);
+  const endpoint = generateStencil([line], { ...options, tabLayouts: { 'outline-0': [tab('endpoint', 0, 6)] } });
+  assert.equal(endpoint.bridges[0].width, 3);
+  assert.equal(insideCuts(endpoint, { x: 12, y: 10 }), 0);
+  assert.equal(insideCuts(endpoint, { x: 14, y: 10 }), 1);
+  assert.ok(endpoint.warnings.some(w => w.includes('requested 6.0 mm tab is 3.0 mm')));
+});
+
+test('small custom outlines preserve tabs and report limited widths without changing requested widths', () => {
+  const tiny = { ...measureContour([{ x: 10, y: 10 }, { x: 12, y: 10 }, { x: 12, y: 12 }, { x: 10, y: 12 }], true), id: 'outline-0' };
+  const tabLayouts = { 'outline-0': [tab('one', 0.1, 6), tab('two', 0.6)] };
+  const result = generateStencil([tiny], { ...options, tabLayouts });
+  assert.equal(result.bridges.length, 2);
+  assert.equal(result.bridges[0].requestedWidth, 6);
+  assert.ok(Math.abs(result.bridges[0].width - 1.4) < 1e-8);
+  assert.ok(result.warnings.some(w => w.includes('to fit')));
+  assert.equal(tabLayouts['outline-0'][0].widthOverride, 6);
+});
+
+test('overlapping custom tabs are merged geometrically and warned about, including across seam', () => {
+  for (const positions of [[0.2, 0.205], [0.999, 0.001]]) {
+    const result = generateStencil([identifiedSquare], { ...options, tabLayouts: { 'outline-0': positions.map((p, i) => tab(`tab-${i}`, p, 6)) } });
+    assert.equal(result.bridges.length, 2);
+    assert.ok(result.warnings.some(w => w.includes('overlapping')));
+    assert.ok(result.paths.length > 0);
+  }
+});
+
+test('resetting a custom outline restores automatic count, placement, and width inheritance', () => {
+  const tabLayouts = { 'outline-0': [tab('custom', 0.1, 9)] };
+  delete tabLayouts['outline-0'];
+  const result = generateStencil([identifiedSquare], { ...options, tabLayouts });
+  assert.equal(result.bridges.length, 4);
+  assert.ok(result.bridges.every(b => !b.custom && b.width === 4));
+});
+
+test('nearest-point projection snaps within segments and handles duplicate vertices', () => {
+  const projection = nearestOnContour(identifiedSquare, { x: 40, y: 8 });
+  assert.deepEqual(projection.point, { x: 40, y: 10 });
+  assert.equal(projection.position, 30 / 400);
+  assert.equal(projection.distance, 2);
+  const duplicated = measureContour([{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 100, y: 0 }], false);
+  assert.equal(nearestOnContour(duplicated, { x: 50, y: 1 }).position, 0.5);
+});
+
+test('curved marker segments follow contour vertices rather than drawing across corners', () => {
+  const tabs = resolveTabs(identifiedSquare, options, [tab('corner', 0.25, 6)]);
+  assert.equal(tabs[0].width, 6);
+  const result = generateStencil([identifiedSquare], { ...options, tabLayouts: { 'outline-0': [tab('corner', 0.25, 6)] } });
+  assert.ok(result.bridges[0].segments[0].some(p => p.x === 110 && p.y === 10));
+});
+
+test('tabs inside an uncut ring interior are not falsely reported as crossed', () => {
+  const inner = { ...measureContour([{ x: 40, y: 40 }, { x: 80, y: 40 }, { x: 80, y: 80 }, { x: 40, y: 80 }], true), id: 'outline-1' };
+  const result = generateStencil([identifiedSquare, inner], { ...options, tabLayouts: { 'outline-0': [] } });
+  assert.ok(!result.warnings.some(w => w.includes('intersect')));
+});

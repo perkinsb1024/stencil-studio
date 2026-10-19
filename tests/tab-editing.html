@@ -1,0 +1,183 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Tab editing checks</title>
+<style>body{font:14px system-ui;padding:24px;color:#502c6c}li{margin:8px 0}.fail{color:#a00}iframe{width:1100px;height:1500px;border:1px solid #ddd}#summary{font-weight:bold}</style>
+<h1>Tab editing checks</h1><p id="summary">Running…</p><ol id="results"></ol><iframe title="Editor under test" src="/"></iframe>
+<script type="module">
+const frame = document.querySelector('iframe');
+await new Promise(resolve => frame.addEventListener('load', resolve));
+const d = frame.contentDocument, w = frame.contentWindow;
+const $ = selector => d.querySelector(selector);
+const settle = () => new Promise(resolve => w.requestAnimationFrame(() => w.requestAnimationFrame(resolve)));
+function assert(value, message = 'Unexpected result') { if (!value) throw new Error(message); }
+async function check(name, action) {
+  const li = document.createElement('li');
+  try { await action(); li.textContent = `PASS — ${name}`; }
+  catch (error) { li.textContent = `FAIL — ${name}: ${error.message}`; li.className = 'fail'; }
+  document.querySelector('#results').append(li);
+}
+async function click(selector) { $(selector).click(); await settle(); }
+async function change(selector, value) { $(selector).value = value; $(selector).dispatchEvent(new w.Event('change', { bubbles: true })); await settle(); }
+const markers = () => [...d.querySelectorAll('.tab-marker')];
+const own = () => markers().filter(m => m.dataset.outline === $('#outline-picker').value);
+const point = marker => { const circle = marker.querySelector('circle'); if (circle) return [Number(circle.getAttribute('cx')), Number(circle.getAttribute('cy'))]; const rect = marker.querySelector('rect'); return [Number(rect.getAttribute('x')) + Number(rect.getAttribute('width')) / 2, Number(rect.getAttribute('y')) + Number(rect.getAttribute('height')) / 2]; };
+await check('Edit mode exposes selectable tabs, inspector and automatic legend', async () => {
+  const before = $('#preview-svg').getBoundingClientRect();
+  await click('#edit-tabs'); assert(markers().length === 8); assert(!$('#tab-inspector').hidden);
+  const after = $('#preview-svg').getBoundingClientRect();
+  assert(Math.abs(before.width - after.width) < 1 && Math.abs(before.height - after.height) < 1, 'Opening tab editing shrank the SVG');
+  assert(markers().every(m => m.getAttribute('role') === 'button' && m.getAttribute('tabindex') === '0'));
+  assert($('.legend').textContent.includes('Automatic tab') && $('.legend').textContent.includes('Custom tab'));
+});
+await check('Selected-tab card stays above the canvas without shifting it on selection or clear', async () => {
+  const before = $('#canvas-area').getBoundingClientRect();
+  const card = $('#tab-inspector').getBoundingClientRect();
+  assert(card.bottom <= before.top, 'Editor card is not above the canvas');
+  assert(!$('#tab-empty-state').hidden);
+  await change('#tab-picker', 'auto-0');
+  assert($('#selected-outline-label').textContent === 'Selected tab · Outline 1 · Tab 1');
+  assert($('#tab-inspector').classList.contains('has-selection'));
+  assert($('#tab-empty-state').hidden);
+  assert(Math.abs($('#canvas-area').getBoundingClientRect().top - before.top) < 1, 'Selecting a tab shifted the canvas');
+  const area = $('.tab-selection-area').getBoundingClientRect(), controls = $('#selected-tab-controls').getBoundingClientRect();
+  assert(controls.bottom <= area.bottom && controls.right <= area.right, 'Selected controls overflow their reserved area');
+  await change('#tab-picker', '');
+  assert(!$('#tab-empty-state').hidden && $('#selected-tab-controls').hidden);
+  assert(Math.abs($('#canvas-area').getBoundingClientRect().top - before.top) < 1, 'Clearing selection shifted the canvas');
+});
+await check('SVG stays the same size when toggling editing, placement, and outline controls', async () => {
+  const baseline = $('#preview-svg').getBoundingClientRect();
+  const unchanged = () => {
+    const svg = $('#preview-svg').getBoundingClientRect();
+    assert(Math.abs(svg.width - baseline.width) < 1 && Math.abs(svg.height - baseline.height) < 1, 'Controls resized the SVG');
+    const viewport = $('#canvas-viewport').getBoundingClientRect();
+    assert(svg.width <= viewport.width && svg.height <= viewport.height, 'SVG exceeds canvas bounds');
+  };
+  await click('#add-tab'); unchanged(); await click('#add-tab'); unchanged();
+  await change('#outline-picker', 'outline-1'); unchanged();
+  await change('#outline-picker', 'outline-0'); unchanged();
+  await click('#edit-tabs'); unchanged(); await click('#edit-tabs'); unchanged();
+});
+await check('Removing an automatic tab freezes only its outline and can be undone/redone', async () => {
+  await change('#tab-picker', 'auto-0'); await click('#remove-tab');
+  assert(own().length === 3); assert($('#outline-mode').textContent === 'Custom');
+  assert($('#automatic-scope').textContent.includes('1 automatic outline'));
+  assert(own().every(m => m.querySelector('circle') && !m.querySelector('rect')));
+  await click('#undo'); assert(own().length === 4); assert($('#outline-mode').textContent === 'Automatic');
+  await click('#redo'); assert(own().length === 3);
+});
+await check('Global count and offset do not move custom tabs', async () => {
+  const before = own().map(point);
+  await change('#tabCount', 6); await change('#tabOffset', 37);
+  assert(JSON.stringify(own().map(point)) === JSON.stringify(before));
+  assert(markers().length === 9);
+});
+await check('Added tabs inherit width; individual overrides survive default changes', async () => {
+  await click('#add-to-outline'); assert(own().length === 4);
+  assert($('#tab-width-status').textContent.includes('Uses default'));
+  await change('#selected-tab-width', 5); await change('#tabWidth', 4);
+  assert($('#selected-tab-width').value === '5');
+  assert(own().filter(m => m.getAttribute('aria-label').includes('4.0 mm')).length === 3);
+  await click('#inherit-tab-width'); assert($('#selected-tab-width').value === '4');
+});
+await check('Selected width slider updates live, stays in sync, and undoes the whole gesture', async () => {
+  const id = $('#tab-picker').value, before = $('#selected-tab-width').value;
+  for (const value of [5, 6, 7]) {
+    $('#selected-tab-width-range').value = value;
+    $('#selected-tab-width-range').dispatchEvent(new w.Event('input')); await settle();
+    assert(Number($('#selected-tab-width').value) === value);
+    assert(own().find(m => m.dataset.tab === id).getAttribute('aria-label').includes(`${value.toFixed(1)} mm`));
+  }
+  $('#selected-tab-width-range').dispatchEvent(new w.Event('change')); await settle();
+  assert($('#tabWidth').value === before, 'Global width changed');
+  await click('#undo'); await change('#tab-picker', id);
+  assert($('#selected-tab-width').value === before && $('#selected-tab-width-range').value === before);
+  assert($('#tab-width-status').textContent.includes('Uses default'), 'Width inheritance was not restored');
+  await click('#redo'); await change('#tab-picker', id); assert($('#selected-tab-width-range').value === '7');
+  await click('#inherit-tab-width'); assert($('#selected-tab-width-range').value === before);
+  await change('#selected-tab-width', 4.8); assert($('#selected-tab-width-range').value === '4.8');
+  await click('#inherit-tab-width');
+});
+await check('Selected position slider moves only its tab and undoes the whole gesture', async () => {
+  const id = $('#tab-picker').value, before = Number($('#selected-tab-position').value);
+  const otherPoints = own().filter(m => m.dataset.tab !== id).map(point);
+  for (const value of [20, 25, 30]) {
+    $('#selected-tab-position-range').value = value;
+    $('#selected-tab-position-range').dispatchEvent(new w.Event('input')); await settle();
+    assert(Number($('#selected-tab-position').value) === value);
+  }
+  $('#selected-tab-position-range').dispatchEvent(new w.Event('change')); await settle();
+  assert(JSON.stringify(own().filter(m => m.dataset.tab !== id).map(point)) === JSON.stringify(otherPoints));
+  await click('#undo'); await change('#tab-picker', id);
+  assert(Math.abs(Number($('#selected-tab-position').value) - before) < 0.01);
+  await click('#redo'); await change('#tab-picker', id); assert($('#selected-tab-position-range').value === '30');
+  await change('#selected-tab-position', 34.5); assert($('#selected-tab-position-range').value === '34.5');
+});
+await check('Numeric position changes only the selected tab and undo restores it', async () => {
+  const id = $('#tab-picker').value, before = point(own().find(m => m.dataset.tab === id));
+  await change('#selected-tab-position', 23);
+  assert(Math.abs(Number($('#selected-tab-position').value) - 23) < 0.01);
+  await click('#undo'); const restored = own().find(m => m.dataset.tab === id);
+  assert(JSON.stringify(point(restored)) === JSON.stringify(before));
+});
+await check('Add mode previews and inserts a tab on the clicked outline', async () => {
+  const before = markers().length;
+  await click('#add-tab');
+  const path = $('.outline-hit-targets path');
+  const p = path.getPointAtLength(path.getTotalLength() * 0.31).matrixTransform($('#preview-svg').getScreenCTM());
+  $('#preview-svg').dispatchEvent(new w.PointerEvent('pointermove', { clientX: p.x, clientY: p.y, bubbles: true }));
+  assert($('#tab-ghost'));
+  $('#preview-svg').dispatchEvent(new w.PointerEvent('pointerdown', { clientX: p.x, clientY: p.y, button: 0, bubbles: true }));
+  await settle(); assert(markers().length === before + 1); assert($('#add-tab').getAttribute('aria-pressed') === 'false');
+});
+await check('Slider changes undo as one action', async () => {
+  const before = $('#tabWidth').value;
+  for (const value of [6, 7, 8]) { $('#tabWidth-range').value = value; $('#tabWidth-range').dispatchEvent(new w.Event('input')); await settle(); }
+  $('#tabWidth-range').dispatchEvent(new w.Event('change')); await settle();
+  await click('#undo'); assert($('#tabWidth').value === before);
+  await click('#redo'); assert($('#tabWidth').value === '8');
+});
+await check('Artwork resizing keeps custom widths and proportional positions', async () => {
+  const selectedId = $('#tab-picker').value;
+  await change('#tab-picker', selectedId || own()[0].dataset.tab);
+  const position = $('#selected-tab-position').value;
+  await change('#selected-tab-width', 5); await change('#artworkWidth', 220);
+  assert($('#selected-tab-width').value === '5'); assert($('#selected-tab-position').value === position);
+});
+await check('Keyboard selection and movement preserve focus', async () => {
+  let marker = own()[0];
+  const id = marker.dataset.tab;
+  marker.focus(); marker.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await settle();
+  assert($('#tab-picker').value === id); assert(d.activeElement.dataset.tab === id);
+  const before = Number($('#selected-tab-position').value);
+  d.activeElement.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); await settle();
+  assert(Math.abs(Number($('#selected-tab-position').value) - before - 0.1) < 0.02); assert(d.activeElement.dataset.tab === id);
+});
+await check('A custom outline can have zero tabs; reset restores automatic layout and can be undone', async () => {
+  while (own().length) { await change('#tab-picker', own()[0].dataset.tab); await click('#remove-tab'); }
+  assert($('#notice').textContent.includes('no tabs')); assert($('.cut-shape').getAttribute('d'));
+  await click('#reset-outline'); assert(own().length > 0); assert($('#outline-mode').textContent === 'Automatic');
+  await click('#undo'); assert(own().length === 0); assert($('#outline-mode').textContent === 'Custom');
+});
+await check('Automatic controls disable when every outline is custom, and reset-all is undoable', async () => {
+  await change('#outline-picker', 'outline-1'); await click('#add-to-outline');
+  assert($('#tabCount').disabled && $('#tabOffset').disabled);
+  await click('#reset-all-tabs'); assert(!$('#tabCount').disabled); assert($('#reset-all-tabs').disabled);
+  await click('#undo'); assert($('#tabCount').disabled); assert(!$('#reset-all-tabs').disabled);
+});
+await check('Changing the artwork clears edits and history without reusing outline edits', async () => {
+  await click('[data-example="orbit"]'); assert(markers().length === 18); assert($('#undo').disabled && $('#redo').disabled);
+  assert($('#automatic-scope').textContent.includes('3 automatic outlines'));
+});
+await check('Preview highlights never enter the exported cut SVG', async () => {
+  let exported;
+  const original = w.URL.createObjectURL;
+  w.URL.createObjectURL = blob => { exported = blob; return 'blob:tab-edit-test'; };
+  const anchorClick = w.HTMLAnchorElement.prototype.click;
+  w.HTMLAnchorElement.prototype.click = function () {};
+  try { await click('#download'); } finally { w.URL.createObjectURL = original; w.HTMLAnchorElement.prototype.click = anchorClick; }
+  const text = await exported.text(); assert(text.includes('width="236mm"'));
+  assert(!text.includes('tab-marker') && !text.includes('#258477') && !text.includes('#c3963e'));
+  assert(text.includes('fill-rule="evenodd"'));
+});
+const failures = document.querySelectorAll('.fail').length;
+document.querySelector('#summary').textContent = `${document.querySelectorAll('li:not(.fail)').length} passed; ${failures} failed.`;
+</script></html>

@@ -45,7 +45,7 @@ export function importSvg(source) {
       clone.flatten(span / 5000);
       if (clone.segments.length > 30000) throw new Error('This artwork has too much detail. Simplify its paths before importing.');
       const points = clone.segments.map(s => ({ x: s.point.x, y: s.point.y }));
-      contours.push({ points, closed: item.closed });
+      contours.push({ id: `outline-${contours.length}`, points, closed: item.closed });
       clone.remove();
     } else if (item.children) for (const child of item.children) collect(child, visible);
     else if (item instanceof paper.SymbolItem) { const expanded = item.definition.item.clone({ insert: false }); expanded.transform(item.globalMatrix); collect(expanded); expanded.remove(); }
@@ -65,7 +65,7 @@ export function scaleArtwork(artwork, width, padding) {
   const { bounds } = artwork;
   const scale = width / (bounds.maxX - bounds.minX);
   return {
-    contours: artwork.contours.map(c => measureContour(c.points.map(p => ({ x: (p.x - bounds.minX) * scale + padding, y: (p.y - bounds.minY) * scale + padding })), c.closed)),
+    contours: artwork.contours.map(c => ({ ...measureContour(c.points.map(p => ({ x: (p.x - bounds.minX) * scale + padding, y: (p.y - bounds.minY) * scale + padding })), c.closed), id: c.id })),
     width: width + 2 * padding,
     height: (bounds.maxY - bounds.minY) * scale + 2 * padding,
     artworkHeight: (bounds.maxY - bounds.minY) * scale,
