@@ -1,10 +1,16 @@
 <!doctype html><html lang="en"><meta charset="utf-8"><title>Tab editing checks</title>
 <style>body{font:14px system-ui;padding:24px;color:#502c6c}li{margin:8px 0}.fail{color:#a00}iframe{width:1100px;height:1500px;border:1px solid #ddd}#summary{font-weight:bold}</style>
-<h1>Tab editing checks</h1><p id="summary">Running…</p><ol id="results"></ol><iframe title="Editor under test" src="/"></iframe>
+<h1>Tab editing checks</h1><p id="summary">Running…</p><ol id="results"></ol><iframe title="Editor under test" src="about:blank"></iframe>
 <script type="module">
 const frame = document.querySelector('iframe');
-await new Promise(resolve => frame.addEventListener('load', resolve));
+localStorage.removeItem('stencil-studio.workspace.v1:tab-editing-tests');
+await new Promise(resolve => { frame.addEventListener('load', resolve, { once: true }); frame.src = '/?workspace=tab-editing-tests&live-reload=off'; });
 const d = frame.contentDocument, w = frame.contentWindow;
+// Virtual-time headless runs may suspend animation frames in an embedded frame.
+if (new URLSearchParams(location.search).has('headless')) {
+  w.requestAnimationFrame = callback => w.setTimeout(() => callback(w.performance.now()), 16);
+  w.cancelAnimationFrame = id => w.clearTimeout(id);
+}
 const $ = selector => d.querySelector(selector);
 const settle = () => new Promise(resolve => w.requestAnimationFrame(() => w.requestAnimationFrame(resolve)));
 function assert(value, message = 'Unexpected result') { if (!value) throw new Error(message); }
@@ -16,6 +22,13 @@ async function check(name, action) {
 }
 async function click(selector) { $(selector).click(); await settle(); }
 async function change(selector, value) { $(selector).value = value; $(selector).dispatchEvent(new w.Event('change', { bubbles: true })); await settle(); }
+async function placeTabOnSelectedOutline() {
+  await click('#add-tab');
+  const path = [...d.querySelectorAll('.outline-hit-targets path')].find(p => p.dataset.outline === $('#outline-picker').value);
+  const p = path.getPointAtLength(path.getTotalLength() * 0.11).matrixTransform($('#preview-svg').getScreenCTM());
+  pointer('pointerdown', $('#preview-svg'), p);
+  await settle();
+}
 const markers = () => [...d.querySelectorAll('.tab-marker')];
 const own = () => markers().filter(m => m.dataset.outline === $('#outline-picker').value);
 const point = marker => { const circle = marker.querySelector('circle'); if (circle) return [Number(circle.getAttribute('cx')), Number(circle.getAttribute('cy'))]; const rect = marker.querySelector('rect'); return [Number(rect.getAttribute('x')) + Number(rect.getAttribute('width')) / 2, Number(rect.getAttribute('y')) + Number(rect.getAttribute('height')) / 2]; };
@@ -71,7 +84,7 @@ await check('Global count and offset do not move custom tabs', async () => {
   assert(markers().length === 9);
 });
 await check('Added tabs inherit width; individual overrides survive default changes', async () => {
-  await click('#add-to-outline'); assert(own().length === 4);
+  await placeTabOnSelectedOutline(); assert(own().length === 4);
   assert($('#tab-width-status').textContent.includes('Uses default'));
   await change('#selected-tab-width', 5); await change('#tabWidth', 4);
   assert($('#selected-tab-width').value === '5');
@@ -158,7 +171,7 @@ await check('A custom outline can have zero tabs; reset restores automatic layou
   await click('#undo'); assert(own().length === 0); assert($('#outline-mode').textContent === 'Custom');
 });
 await check('Automatic controls disable when every outline is custom, and reset-all is undoable', async () => {
-  await change('#outline-picker', 'outline-1'); await click('#add-to-outline');
+  await change('#outline-picker', 'outline-1'); await placeTabOnSelectedOutline();
   assert($('#tabCount').disabled && $('#tabOffset').disabled);
   await click('#reset-all-tabs'); assert(!$('#tabCount').disabled); assert($('#reset-all-tabs').disabled);
   await click('#undo'); assert($('#tabCount').disabled); assert(!$('#reset-all-tabs').disabled);
@@ -177,6 +190,133 @@ await check('Preview highlights never enter the exported cut SVG', async () => {
   const text = await exported.text(); assert(text.includes('width="236mm"'));
   assert(!text.includes('tab-marker') && !text.includes('#258477') && !text.includes('#c3963e'));
   assert(text.includes('fill-rule="evenodd"'));
+});
+// Exercise pointer gestures against the same SVG handlers used by real input.
+function pointer(type, target, p, extra = {}) {
+  target.dispatchEvent(new w.PointerEvent(type, { pointerId: 7, clientX: p.x, clientY: p.y, button: 0, bubbles: true, ...extra }));
+}
+function screenPoint(x, y) { return new w.DOMPoint(x, y).matrixTransform($('#preview-svg').getScreenCTM()); }
+function selectAllTabs(allOutlines = true) {
+  $(allOutlines ? '#all-layers' : '#selected-layer-only').click();
+  const svg = $('#preview-svg'), box = svg.viewBox.baseVal;
+  pointer('pointerdown', svg, screenPoint(1, 1));
+  pointer('pointermove', svg, screenPoint(box.width - 1, box.height - 1));
+  assert($('#tab-selection-box'), 'Selection rectangle did not appear');
+  pointer('pointerup', svg, screenPoint(box.width - 1, box.height - 1));
+  assert(!$('#tab-selection-box'), 'Selection rectangle remained after release');
+}
+await check('Dragging a tab follows its own path, syncs sliders, and undoes once', async () => {
+  await click('[data-example="bloom"]');
+  await change('#tab-picker', 'auto-0');
+  const marker = own()[0], before = point(marker);
+  const path = [...d.querySelectorAll('.outline-hit-targets path')].find(p => p.dataset.outline === marker.dataset.outline);
+  const target = path.getPointAtLength(path.getTotalLength() * 0.36);
+  pointer('pointerdown', marker, screenPoint(...before));
+  pointer('pointermove', $('#preview-svg'), screenPoint(target.x, target.y));
+  assert(Math.abs(Number($('#selected-tab-position').value) - 36) < 0.02);
+  assert($('#selected-tab-position-range').value === $('#selected-tab-position').value);
+  pointer('pointerup', $('#preview-svg'), screenPoint(target.x, target.y));
+  await click('#undo'); assert(JSON.stringify(point(own()[0])) === JSON.stringify(before));
+  await click('#redo'); await change('#tab-picker', 'auto-0');
+  assert(Math.abs(Number($('#selected-tab-position').value) - 36) < 0.02);
+});
+await check('Rectangle selection defaults to the outline chosen before dragging', async () => {
+  assert($('#selected-layer-only').checked && !$('#all-layers').checked, 'Selected layer only should default on');
+  await change('#outline-picker', 'outline-1');
+  const pathOnOtherOutline = [...d.querySelectorAll('.outline-hit-targets path')].find(p => p.dataset.outline === 'outline-0');
+  const svg = $('#preview-svg'), box = svg.viewBox.baseVal;
+  // Start over another outline's hit target; the pre-drag picker still sets scope.
+  pointer('pointerdown', pathOnOtherOutline, screenPoint(1, 1));
+  pointer('pointermove', svg, screenPoint(box.width - 1, box.height - 1));
+  pointer('pointerup', svg, screenPoint(box.width - 1, box.height - 1));
+  assert($('#outline-picker').value === 'outline-1');
+  assert(own().every(m => m.getAttribute('aria-pressed') === 'true'));
+  assert(markers().filter(m => m.dataset.outline !== 'outline-1').every(m => m.getAttribute('aria-pressed') === 'false'));
+  const otherLabels = markers().filter(m => m.dataset.outline !== 'outline-1').map(m => m.getAttribute('aria-label'));
+  await change('#selected-tab-width', 6);
+  assert(own().every(m => m.getAttribute('aria-label').includes('6.0 mm')));
+  assert(JSON.stringify(markers().filter(m => m.dataset.outline !== 'outline-1').map(m => m.getAttribute('aria-label'))) === JSON.stringify(otherLabels));
+  await click('#undo');
+});
+await check('Rectangle selection spans outlines and sets a shared width with one undo', async () => {
+  selectAllTabs();
+  assert(markers().every(m => m.getAttribute('aria-pressed') === 'true'));
+  assert($('#selected-outline-label').textContent === `${markers().length} tabs selected`);
+  await change('#selected-tab-width', 5);
+  assert(markers().every(m => m.getAttribute('aria-label').includes('5.0 mm')));
+  await click('#undo'); assert(markers().some(m => !m.getAttribute('aria-label').includes('5.0 mm')));
+  await click('#redo'); assert(markers().every(m => m.getAttribute('aria-label').includes('5.0 mm')));
+});
+await check('Group position slider preserves relative positions across outlines through wraparound', async () => {
+  selectAllTabs();
+  const paths = [...d.querySelectorAll('.outline-hit-targets path')];
+  const before = markers().map(m => {
+    const path = paths.find(p => p.dataset.outline === m.dataset.outline), [x, y] = point(m);
+    let best = Infinity, fraction = 0;
+    for (let i = 0; i < 2000; i++) {
+      const p = path.getPointAtLength(path.getTotalLength() * i / 2000), distance = Math.hypot(p.x - x, p.y - y);
+      if (distance < best) { best = distance; fraction = i / 2000; }
+    }
+    return { id: m.dataset.tab, outline: m.dataset.outline, fraction, path };
+  });
+  const anchor = Number($('#selected-tab-position').value);
+  for (const delta of [20, 40, 55]) {
+    $('#selected-tab-position-range').value = anchor + delta;
+    $('#selected-tab-position-range').dispatchEvent(new w.Event('input')); await settle();
+  }
+  $('#selected-tab-position-range').dispatchEvent(new w.Event('change')); await settle();
+  for (const ref of before) {
+    const marker = markers().find(m => m.dataset.tab === ref.id && m.dataset.outline === ref.outline);
+    const [x, y] = point(marker), expected = ref.path.getPointAtLength(ref.path.getTotalLength() * ((ref.fraction + 0.55) % 1));
+    assert(Math.hypot(x - expected.x, y - expected.y) < 0.2, 'Group spacing changed');
+  }
+  await click('#undo');
+  for (const ref of before) {
+    const [x, y] = point(markers().find(m => m.dataset.tab === ref.id && m.dataset.outline === ref.outline));
+    const expected = ref.path.getPointAtLength(ref.path.getTotalLength() * ref.fraction);
+    assert(Math.hypot(x - expected.x, y - expected.y) < 0.2, 'Undo did not restore group');
+  }
+});
+await check('Cancelled dragging restores layout and removes the rectangle', async () => {
+  selectAllTabs();
+  const before = markers().map(point), marker = markers()[0];
+  pointer('pointerdown', marker, screenPoint(...point(marker)));
+  pointer('pointermove', $('#preview-svg'), screenPoint(40, 40));
+  pointer('pointercancel', $('#preview-svg'), screenPoint(40, 40));
+  assert(JSON.stringify(markers().map(point)) === JSON.stringify(before));
+  const svg = $('#preview-svg');
+  pointer('pointerdown', svg, screenPoint(1, 1));
+  pointer('pointermove', svg, screenPoint(100, 100));
+  pointer('pointercancel', svg, screenPoint(100, 100));
+  assert(!$('#tab-selection-box'));
+});
+await check('Dragging a selected group moves every tab and undoes in one step', async () => {
+  selectAllTabs();
+  const marker = markers()[0], before = markers().map(point);
+  const startPosition = Number($('#selected-tab-position').value) / 100;
+  const path = [...d.querySelectorAll('.outline-hit-targets path')].find(p => p.dataset.outline === marker.dataset.outline);
+  const target = path.getPointAtLength(path.getTotalLength() * ((startPosition + 0.07) % 1));
+  pointer('pointerdown', marker, screenPoint(...point(marker)));
+  pointer('pointermove', $('#preview-svg'), screenPoint(target.x, target.y));
+  pointer('pointerup', $('#preview-svg'), screenPoint(target.x, target.y));
+  assert(markers().every((m, i) => Math.hypot(point(m)[0] - before[i][0], point(m)[1] - before[i][1]) > 1), 'Some selected tabs stayed still');
+  await click('#undo'); assert(JSON.stringify(markers().map(point)) === JSON.stringify(before));
+});
+await check('Open-path group position stops at the endpoint without collapsing spacing', async () => {
+  const file = new w.File(['<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0L100 50"/></svg>'], 'open-group.svg', { type: 'image/svg+xml' });
+  const transfer = new w.DataTransfer(); transfer.items.add(file);
+  $('#file-input').files = transfer.files; $('#file-input').dispatchEvent(new w.Event('change'));
+  for (let i = 0; i < 40 && $('#filename').textContent !== 'open-group.svg'; i++) await settle();
+  assert($('#filename').textContent === 'open-group.svg', 'Test SVG did not load');
+  selectAllTabs();
+  const before = markers().map(point);
+  await change('#selected-tab-position', 100);
+  const after = markers().map(point);
+  const dx = after[0][0] - before[0][0], dy = after[0][1] - before[0][1];
+  assert(dx > 1);
+  assert(after.every((p, i) => Math.abs(p[0] - before[i][0] - dx) < 0.001 && Math.abs(p[1] - before[i][1] - dy) < 0.001), 'Group collapsed at the endpoint');
+  const path = $('.outline-hit-targets path'), end = path.getPointAtLength(path.getTotalLength());
+  assert(Math.hypot(after.at(-1)[0] - end.x, after.at(-1)[1] - end.y) < 0.001);
 });
 const failures = document.querySelectorAll('.fail').length;
 document.querySelector('#summary').textContent = `${document.querySelectorAll('li:not(.fail)').length} passed; ${failures} failed.`;

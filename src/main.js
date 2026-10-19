@@ -1,6 +1,7 @@
 import { importSvg, scaleArtwork, examples } from './import-svg.js';
 import { generateStencil, pathData, exportSvg } from './geometry.js';
 import { customizeContour, nearestOnContour } from './tab-layout.js';
+import { workspaceKey, readWorkspace, writeWorkspace } from './workspace-storage.js';
 
 const icons = {
   upload: '<path d="M12 16V4m-4 4 4-4 4 4M4 15v5h16v-5"/>',
@@ -21,7 +22,7 @@ const icons = {
 };
 const icon = (name, cls = '') => `<svg class="icon ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] || ''}</svg>`;
 const defaults = { artworkWidth: 150, channelWidth: 1.5, tabWidth: 3, tabCount: 4, tabOffset: 0, margin: 8 };
-const state = { ...defaults, artwork: null, name: 'Bloom.svg', view: 'material', showTabs: true, showOriginal: false, zoom: 1, sourceWarnings: [], result: null, scaled: null, tabLayouts: {}, editing: false, adding: false, selectedContour: null, selectedTab: null };
+const state = { ...defaults, artwork: null, source: null, example: '', name: 'Bloom.svg', view: 'material', showTabs: true, showOriginal: false, zoom: 1, sourceWarnings: [], result: null, scaled: null, tabLayouts: {}, editing: false, adding: false, selectedContour: null, selectedTab: null, selectedTabs: [], selectCurrentOutlineOnly: true };
 const $ = s => document.querySelector(s);
 
 document.querySelector('#app').innerHTML = `
@@ -58,7 +59,6 @@ document.querySelector('#app').innerHTML = `
         <div class="preview-options"><label class="check-label"><input type="checkbox" id="show-tabs" checked /><span>Highlight tabs</span><span class="swatch amber"></span></label><label class="check-label"><input type="checkbox" id="show-original" /><span>Original outline</span></label><span class="preview-units">UNITS: MM</span></div>
         <div class="tab-edit-toolbar" role="group" aria-label="Tab editing">
           <button id="edit-tabs" class="small-button" aria-pressed="false">Edit tabs</button>
-          <button id="add-tab" class="small-button" aria-pressed="false" hidden>Add tab</button>
           <span class="edit-spacer"></span>
           <button id="undo" class="small-button" aria-label="Undo last change" title="Undo (⌘/Ctrl Z)" disabled>Undo</button>
           <button id="redo" class="small-button" aria-label="Redo last change" title="Redo (⌘/Ctrl Shift Z)" disabled>Redo</button>
@@ -70,6 +70,13 @@ document.querySelector('#app').innerHTML = `
             <div><label for="outline-picker">Outline</label><select id="outline-picker" aria-label="Select outline"></select></div>
             <div><label for="tab-picker">Tab</label><select id="tab-picker" aria-label="Select tab"></select></div>
           </div>
+          <fieldset class="selection-scope">
+            <legend>Drag a rectangle to select tabs on:</legend>
+            <div class="selection-scope-options">
+              <label><input type="radio" name="rectangle-selection-scope" id="selected-layer-only" value="selected" checked /><span>Selected layer only</span></label>
+              <label><input type="radio" name="rectangle-selection-scope" id="all-layers" value="all" /><span>All layers</span></label>
+            </div>
+          </fieldset>
           <div class="tab-selection-area">
             <div id="tab-empty-state"><strong>Select a tab in the preview</strong><span>Or choose one above to adjust its width and position.</span></div>
             <div id="selected-tab-controls" hidden>
@@ -77,7 +84,7 @@ document.querySelector('#app').innerHTML = `
               <div class="control tab-position-control"><div class="control-label"><label for="selected-tab-position">Position</label><div class="number-unit"><input id="selected-tab-position" type="number" min="0" max="100" step="0.1" /><span>%</span></div></div><input id="selected-tab-position-range" type="range" min="0" max="100" step="0.1" aria-label="Selected tab position slider" /></div>
             </div>
           </div>
-          <div class="outline-actions"><button id="inherit-tab-width" class="small-button" disabled>Use default width</button><button id="remove-tab" class="small-button danger" disabled>Remove selected tab</button><button id="add-to-outline" class="small-button">Add tab to this outline</button><button id="reset-outline" class="small-button" title="Clears this outline’s custom positions and width overrides. Undo is available.">Reset outline to automatic</button></div>
+          <div class="outline-actions"><button id="inherit-tab-width" class="small-button" disabled>Use default width</button><button id="remove-tab" class="small-button danger" disabled>Remove selected tab</button><button id="add-tab" class="small-button" aria-pressed="false" hidden>Add tab</button><button id="reset-outline" class="small-button" title="Clears this outline’s custom positions and width overrides. Undo is available.">Reset outline to automatic</button></div>
           <p class="control-hint" id="outline-mode-hint"></p>
         </section>
         <div class="canvas-area" id="canvas-area">
@@ -110,6 +117,11 @@ function render() {
   state.scaled = scaleArtwork(state.artwork, state.artworkWidth, Math.max(state.margin, state.channelWidth / 2 + 2));
   state.result = generateStencil(state.scaled.contours, state);
   const { width, height, contours, artworkHeight } = state.scaled;
+  // Drop selections removed by resets, undo, or changes to automatic placement.
+  state.selectedTabs = state.selectedTab == null ? [] : state.selectedTabs.filter(ref => state.result.bridges.some(b => matchesTab(b, ref)));
+  if (state.selectedTabs.length && !selectedBridge()) {
+    state.selectedContour = state.selectedTabs[0].contourId; state.selectedTab = state.selectedTabs[0].id;
+  }
   updateTabEditor();
   const svg = $('#preview-svg');
   svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
@@ -150,9 +162,33 @@ function fitSheet() {
   wrap.style.height = `${height}px`;
   wrap.style.transform = `scale(${state.zoom})`;
   $('#zoom-label').textContent = `${Math.round(state.zoom * 100)}%`;
+  queueWorkspaceSave();
 }
 
 function selectedContour() { return state.scaled?.contours.find(c => c.id === state.selectedContour); }
+function matchesTab(bridge, ref) { return bridge.contourId === ref.contourId && bridge.id === ref.id; }
+function selectTab(contourId, id) {
+  state.selectedContour = contourId; state.selectedTab = id;
+  state.selectedTabs = id ? [{ contourId, id }] : [];
+}
+function selectedBridges() {
+  return state.result?.bridges.filter(b => state.selectedTabs.some(ref => matchesTab(b, ref))) ?? [];
+}
+function selectionPositions() {
+  return selectedBridges().map(b => ({ contourId: b.contourId, id: b.id, position: b.position, closed: state.scaled.contours.find(c => c.id === b.contourId).closed }));
+}
+function applyPositionDelta(tabs, delta) {
+  // A shared bound keeps open-outline groups from collapsing at endpoints.
+  const open = tabs.filter(t => !t.closed);
+  if (open.length) delta = Math.max(-Math.min(...open.map(t => t.position)), Math.min(1 - Math.max(...open.map(t => t.position)), delta));
+  for (const ref of tabs) {
+    const contour = state.scaled.contours.find(c => c.id === ref.contourId);
+    const tab = customizeContour(state.tabLayouts, contour, state).find(t => t.id === ref.id);
+    const position = ref.position + delta;
+    tab.position = ref.closed ? ((position % 1) + 1) % 1 : position;
+  }
+}
+let positionGesture = null;
 function selectedBridge() { return state.result?.bridges.find(b => b.contourId === state.selectedContour && b.id === state.selectedTab); }
 function customizeSelected() {
   const contour = selectedContour();
@@ -168,14 +204,14 @@ function screenUnit() {
 function renderTabMarkers() {
   const radius = screenUnit() * 3.5;
   return `<g class="tab-markers">${state.result.bridges.map(b => {
-    const selected = b.contourId === state.selectedContour && b.id === state.selectedTab && state.editing;
+    const selected = state.editing && state.selectedTabs.some(ref => matchesTab(b, ref));
     const color = b.custom ? '#258477' : '#c3963e';
     const label = `${b.custom ? 'Custom' : 'Automatic'} tab, outline ${state.scaled.contours.findIndex(c => c.id === b.contourId) + 1}, ${b.width.toFixed(1)} mm${b.widthOverride == null ? ', default width' : ', width override'}`;
     return `<g data-tab="${b.id}" data-outline="${b.contourId}" class="tab-marker ${selected ? 'selected' : ''}" ${state.editing ? `tabindex="0" role="button" aria-label="${label}" aria-pressed="${selected}"` : ''}>
       <title>${label}</title>
       <path d="${b.segments.map(p => pathData(p, false)).join('')}" fill="none" stroke="${color}" stroke-width="${state.channelWidth + 0.65}" opacity="0.65"/>
       ${b.custom ? `<circle cx="${b.point.x}" cy="${b.point.y}" r="${radius}"` : `<rect x="${b.point.x - radius}" y="${b.point.y - radius}" width="${radius * 2}" height="${radius * 2}"`} fill="${color}" stroke="#fffef9" stroke-width="1" vector-effect="non-scaling-stroke"/>
-      ${selected ? `<circle cx="${b.point.x}" cy="${b.point.y}" r="${radius + screenUnit() * 4}" fill="none" stroke="#502c6c" stroke-width="2" vector-effect="non-scaling-stroke"/>` : ''}
+      ${selected ? `<circle cx="${b.point.x}" cy="${b.point.y}" r="${radius + screenUnit() * 4}" fill="none" stroke="#ff2da6" stroke-width="3" vector-effect="non-scaling-stroke"/>` : ''}
       ${state.editing ? `<circle cx="${b.point.x}" cy="${b.point.y}" r="${screenUnit() * 12}" fill="transparent"/>` : ''}
     </g>`;
   }).join('')}</g>`;
@@ -193,7 +229,7 @@ function updateTabEditor() {
   $('#add-tab').setAttribute('aria-pressed', state.adding);
   $('#add-tab').textContent = state.adding ? 'Cancel adding' : 'Add tab';
   $('#edit-hint').hidden = !state.editing;
-  $('#edit-hint').textContent = state.adding ? 'Click an outline to add a tab at the previewed position. Esc cancels.' : 'Select a tab to adjust its width or remove it. Drag along its outline to move it. Tab and Enter also select tabs.';
+  $('#edit-hint').textContent = state.adding ? 'Click an outline to add a tab at the previewed position. Esc cancels.' : `Drag a tab along its outline to move it. Drag empty space to select tabs ${state.selectCurrentOutlineOnly ? 'on the current outline' : 'across outlines'}; Shift adds to the selection. Width applies to all selected tabs; position moves them together.`;
   $('#tab-inspector').hidden = !state.editing;
   $('#show-tabs').disabled = state.editing;
   $('#show-tabs').checked = state.editing || state.showTabs;
@@ -210,12 +246,16 @@ function updateTabEditor() {
   $('#tab-picker').innerHTML = '<option value="">Select a tab…</option>' + tabs.map((b, i) => `<option value="${b.id}">Tab ${i + 1} · ${b.width.toFixed(1)} mm${b.widthOverride == null ? ' · Default' : ' · Override'}</option>`).join('');
   $('#tab-picker').value = state.selectedTab ?? '';
   const bridge = selectedBridge();
+  const selection = selectedBridges();
+  const multiple = selection.length > 1;
+  $('#remove-tab').textContent = multiple ? 'Remove selected tabs' : 'Remove selected tab';
+  $('label[for="selected-tab-position"]').textContent = multiple ? 'Position (move group)' : 'Position';
   $('#selected-tab-controls').hidden = !bridge;
   $('#tab-empty-state').hidden = !!bridge;
   $('#remove-tab').disabled = !bridge;
   $('#inherit-tab-width').disabled = !bridge || bridge.widthOverride == null;
   $('#tab-inspector').classList.toggle('has-selection', !!bridge);
-  $('#selected-outline-label').textContent = bridge ? `Selected tab · Outline ${outlineNumber} · Tab ${tabs.indexOf(bridge) + 1}` : `Tab editing · Outline ${outlineNumber}`;
+  $('#selected-outline-label').textContent = multiple ? `${selection.length} tabs selected` : bridge ? `Selected tab · Outline ${outlineNumber} · Tab ${tabs.indexOf(bridge) + 1}` : `Tab editing · Outline ${outlineNumber}`;
   if (bridge) {
     $('#selected-tab-width').value = bridge.requestedWidth;
     $('#selected-tab-width-range').value = bridge.requestedWidth;
@@ -223,7 +263,8 @@ function updateTabEditor() {
     $('#selected-tab-position-range').value = $('#selected-tab-position').value;
     updateRangePaint();
     $('#tab-width-status').textContent = `${bridge.widthOverride == null ? 'Uses default width.' : 'Individual width override.'}${bridge.width < bridge.requestedWidth - 1e-7 ? ` Effective width: ${bridge.width.toFixed(2)} mm to fit this outline.` : ''}`;
-    $('#inherit-tab-width').disabled = bridge.widthOverride == null;
+    if (multiple) $('#tab-width-status').textContent = selection.every(b => b.requestedWidth === bridge.requestedWidth) ? 'Width applies to all selected tabs.' : 'Mixed widths. Set a width to apply it to all selected tabs.';
+    $('#inherit-tab-width').disabled = selection.every(b => b.widthOverride == null);
   }
   $('#reset-outline').disabled = !isCustom;
 }
@@ -232,36 +273,47 @@ function addTab(contourId, position) {
   mutate(() => {
     const tabs = customizeSelected();
     const id = `tab-${crypto.randomUUID()}`;
-    tabs.push({ id, position, widthOverride: null }); state.selectedTab = id;
+    tabs.push({ id, position, widthOverride: null }); selectTab(contourId, id);
     state.adding = false;
   });
 }
 function removeSelectedTab() {
-  if (!selectedBridge()) return;
+  const selection = selectedBridges();
+  if (!selection.length) return;
   mutate(() => {
-    const tabs = customizeSelected();
-    tabs.splice(tabs.findIndex(t => t.id === state.selectedTab), 1); state.selectedTab = null;
+    for (const ref of selection) {
+      const contour = state.scaled.contours.find(c => c.id === ref.contourId);
+      const tabs = customizeContour(state.tabLayouts, contour, state);
+      tabs.splice(tabs.findIndex(t => t.id === ref.id), 1);
+    }
+    selectTab(state.selectedContour, null);
   });
 }
 function updateSelectedTab(property, value, live = false) {
-  if (!selectedBridge()) return;
+  const bridge = selectedBridge();
+  if (!bridge) return;
+  if (live && !pendingSettings) pendingSettings = snapshot();
+  if (property === 'position' && !positionGesture) positionGesture = { tabs: selectionPositions(), anchor: bridge.position };
+  const gesture = positionGesture;
   const apply = () => {
-    const tab = customizeSelected().find(t => t.id === state.selectedTab);
-    tab[property] = value;
+    if (property === 'position') applyPositionDelta(gesture.tabs, value - gesture.anchor);
+    else for (const ref of selectedBridges()) {
+      const contour = state.scaled.contours.find(c => c.id === ref.contourId);
+      customizeContour(state.tabLayouts, contour, state).find(t => t.id === ref.id)[property] = value;
+    }
   };
-  if (live) {
-    // Capture the layout before the first input, including automatic mode and
-    // width inheritance, so one undo restores the whole slider gesture.
-    if (!pendingSettings) pendingSettings = snapshot();
-    apply(); scheduleRender();
-  } else mutate(apply);
+  if (live) { apply(); scheduleRender(); }
+  else { mutate(apply); positionGesture = null; }
 }
 $('#edit-tabs').addEventListener('click', () => {
   state.editing = !state.editing; state.adding = false; render();
 });
 $('#add-tab').addEventListener('click', () => { state.adding = !state.adding; render(); });
-$('#outline-picker').addEventListener('change', e => { state.selectedContour = e.target.value; state.selectedTab = null; render(); });
-$('#tab-picker').addEventListener('change', e => { state.selectedTab = e.target.value || null; render(); });
+document.querySelectorAll('input[name="rectangle-selection-scope"]').forEach(input => {
+  input.addEventListener('change', e => { state.selectCurrentOutlineOnly = e.target.value === 'selected'; updateTabEditor(); queueWorkspaceSave(); });
+});
+$('#outline-picker').addEventListener('change', e => { commitSettings(); selectTab(e.target.value, null); render(); });
+$('#tab-picker').addEventListener('change', e => { commitSettings(); selectTab(state.selectedContour, e.target.value || null); render(); });
 $('#selected-tab-width').addEventListener('change', e => {
   const value = Number(e.target.value);
   if (e.target.value === '' || !Number.isFinite(value)) return updateTabEditor();
@@ -285,19 +337,6 @@ $('#inherit-tab-width').addEventListener('click', () => updateSelectedTab('width
 $('#remove-tab').addEventListener('click', removeSelectedTab);
 $('#reset-outline').addEventListener('click', () => mutate(() => { delete state.tabLayouts[state.selectedContour]; state.selectedTab = null; }));
 $('#reset-all-tabs').addEventListener('click', () => mutate(() => { state.tabLayouts = {}; state.selectedTab = null; }));
-$('#add-to-outline').addEventListener('click', () => {
-  const contour = selectedContour();
-  if (!contour) return;
-  const positions = state.result.bridges.filter(b => b.contourId === contour.id).map(b => b.position).sort((a, b) => a - b);
-  // Keyboard-accessible placement in the largest free interval; position can be edited numerically.
-  const edges = contour.closed && positions.length ? [...positions, positions[0] + 1] : [0, ...positions, 1];
-  let position = 0.5, largest = -1;
-  for (let i = 1; i < edges.length; i++) if (edges[i] - edges[i - 1] > largest) {
-    largest = edges[i] - edges[i - 1]; position = ((edges[i] + edges[i - 1]) / 2) % 1;
-  }
-  addTab(contour.id, position);
-});
-
 function svgPoint(event) {
   const matrix = $('#preview-svg').getScreenCTM();
   return matrix ? new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse()) : null;
@@ -324,57 +363,88 @@ function showGhost(event) {
   $('#preview-svg').append(ghost);
 }
 let drag = null;
-$('#preview-svg').addEventListener('pointerdown', e => {
+const preview = $('#preview-svg');
+function drawSelectionBox(start, end) {
+  $('#tab-selection-box')?.remove();
+  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  rect.id = 'tab-selection-box';
+  for (const [key, value] of Object.entries({ x: Math.min(start.x, end.x), y: Math.min(start.y, end.y), width: Math.abs(end.x - start.x), height: Math.abs(end.y - start.y) })) rect.setAttribute(key, value);
+  preview.append(rect);
+}
+preview.addEventListener('pointerdown', e => {
   if (!state.editing || e.button !== 0 || drag) return;
   if (state.adding) {
     const nearest = nearestOutline(e);
     if (nearest) { e.preventDefault(); addTab(nearest.contour.id, nearest.position); }
     return;
   }
+  commitSettings();
   const marker = e.target.closest('[data-tab]');
   const outline = e.target.closest('[data-outline]');
-  if (outline) state.selectedContour = outline.dataset.outline;
-  state.selectedTab = marker?.dataset.tab ?? null;
+  const previous = [...state.selectedTabs];
+  const selectionContour = state.selectCurrentOutlineOnly ? state.selectedContour : null;
   if (marker) {
-    commitSettings();
-    drag = { pointerId: e.pointerId, x: e.clientX, y: e.clientY, before: snapshot(), moved: false, contourId: state.selectedContour, tabId: state.selectedTab };
-    $('#preview-svg').setPointerCapture(e.pointerId); e.preventDefault();
-  }
-  render();
+    const ref = { contourId: marker.dataset.outline, id: marker.dataset.tab };
+    if (!state.selectedTabs.some(t => t.id === ref.id && t.contourId === ref.contourId)) {
+      selectTab(ref.contourId, ref.id);
+      if (e.shiftKey) state.selectedTabs = [...previous, ref];
+    } else { state.selectedContour = ref.contourId; state.selectedTab = ref.id; }
+  } else selectTab(outline?.dataset.outline ?? state.selectedContour, null);
+  drag = { kind: marker ? 'tabs' : 'box', pointerId: e.pointerId, x: e.clientX, y: e.clientY, start: svgPoint(e), before: snapshot(), moved: false,
+    tabs: selectionPositions(), anchor: selectedBridge()?.position, contourId: state.selectedContour, selectionContour, previous: e.shiftKey ? previous.filter(ref => marker || !selectionContour || ref.contourId === selectionContour) : [] };
+  // Capture on the persistent SVG, whose marker children are replaced on render.
+  if (e.isTrusted) preview.setPointerCapture(e.pointerId);
+  e.preventDefault(); render();
 });
-$('#preview-svg').addEventListener('click', e => {
-  // Accessibility APIs can activate a button without pointer events.
+preview.addEventListener('click', e => {
   if (!state.editing || state.adding || e.detail !== 0) return;
   const marker = e.target.closest('[data-tab]');
   if (!marker) return;
-  state.selectedContour = marker.dataset.outline; state.selectedTab = marker.dataset.tab; render();
+  selectTab(marker.dataset.outline, marker.dataset.tab); render();
 });
-$('#preview-svg').addEventListener('pointermove', e => {
+preview.addEventListener('pointermove', e => {
   if (state.adding) return showGhost(e);
   if (!drag || drag.pointerId !== e.pointerId) return;
   if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 3) return;
   const point = svgPoint(e); if (!point) return;
-  const contour = state.scaled.contours.find(c => c.id === drag.contourId);
-  if (!contour) return;
-  const tab = customizeSelected().find(t => t.id === drag.tabId);
-  tab.position = nearestOnContour(contour, point).position; drag.moved = true;
-  render();
+  drag.moved = true;
+  if (drag.kind === 'box') {
+    const start = drag.start;
+    const inside = state.result.bridges.filter(b => (!drag.selectionContour || b.contourId === drag.selectionContour) && b.point.x >= Math.min(start.x, point.x) && b.point.x <= Math.max(start.x, point.x) && b.point.y >= Math.min(start.y, point.y) && b.point.y <= Math.max(start.y, point.y));
+    state.selectedTabs = [...drag.previous];
+    for (const b of inside) if (!state.selectedTabs.some(ref => matchesTab(b, ref))) state.selectedTabs.push({ contourId: b.contourId, id: b.id });
+    const anchor = state.selectedTabs[0];
+    state.selectedTab = anchor?.id ?? null;
+    if (anchor) state.selectedContour = anchor.contourId;
+    else if (drag.selectionContour) state.selectedContour = drag.selectionContour;
+    render(); drawSelectionBox(start, point);
+  } else {
+    const contour = state.scaled.contours.find(c => c.id === drag.contourId);
+    const position = nearestOnContour(contour, point).position;
+    let delta = position - drag.anchor;
+    if (contour.closed && drag.tabs.length > 1) delta -= Math.round(delta);
+    applyPositionDelta(drag.tabs, delta); render();
+  }
 });
 function finishDrag(event, cancelled = false) {
   if (!drag || drag.pointerId !== event.pointerId) return;
   const finished = drag; drag = null;
+  $('#tab-selection-box')?.remove();
   if (cancelled && finished.moved) restore(finished.before);
-  else if (finished.moved) history.record(finished.before);
-  if ($('#preview-svg').hasPointerCapture(event.pointerId)) $('#preview-svg').releasePointerCapture(event.pointerId);
+  else if (finished.moved && finished.kind === 'tabs') history.record(finished.before);
+  if (preview.hasPointerCapture(event.pointerId)) preview.releasePointerCapture(event.pointerId);
 }
-$('#preview-svg').addEventListener('pointerup', e => finishDrag(e));
-$('#preview-svg').addEventListener('pointercancel', e => finishDrag(e, true));
-$('#preview-svg').addEventListener('pointerleave', clearGhost);
+preview.addEventListener('pointerup', e => finishDrag(e));
+preview.addEventListener('pointercancel', e => finishDrag(e, true));
+preview.addEventListener('lostpointercapture', e => finishDrag(e, true));
+preview.addEventListener('pointerleave', clearGhost);
 $('#preview-svg').addEventListener('keydown', e => {
   const marker = e.target.closest('[data-tab]');
   if (!marker || !state.editing) return;
   if (['Enter', ' ', 'Delete', 'Backspace', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-    e.preventDefault(); state.selectedContour = marker.dataset.outline; state.selectedTab = marker.dataset.tab;
+    e.preventDefault();
+    if (!state.selectedTabs.some(ref => ref.contourId === marker.dataset.outline && ref.id === marker.dataset.tab)) selectTab(marker.dataset.outline, marker.dataset.tab);
+    else { state.selectedContour = marker.dataset.outline; state.selectedTab = marker.dataset.tab; }
     if (e.key === 'Delete' || e.key === 'Backspace') removeSelectedTab();
     else if (e.key.startsWith('Arrow')) {
       const bridge = selectedBridge();
@@ -392,7 +462,7 @@ document.addEventListener('keydown', e => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
     e.preventDefault(); commitSettings(); if (e.shiftKey) history.redo(); else history.undo();
   } else if (e.key === 'Escape') {
-    if (drag) { const saved = drag.before; drag = null; restore(saved); }
+    if (drag) finishDrag({ pointerId: drag.pointerId }, true);
     state.adding = false; clearGhost(); render();
   }
 });
@@ -401,7 +471,7 @@ function loadSource(source, name, example = '') {
   try {
     const artwork = importSvg(source);
     cancelAnimationFrame(renderFrame);
-    state.artwork = artwork; state.name = name; state.sourceWarnings = artwork.warnings; state.zoom = 1;
+    state.artwork = artwork; state.source = source; state.example = example; state.name = name; state.sourceWarnings = artwork.warnings; state.zoom = 1;
     state.tabLayouts = {}; state.selectedContour = artwork.contours[0].id; state.selectedTab = null; state.adding = false;
     history.clear(); pendingSettings = null;
     $('#filename').textContent = name;
@@ -437,6 +507,8 @@ function createHistory() {
     undo() { if (!past.length) return; future.push(snapshot()); restore(past.pop()); },
     redo() { if (!future.length) return; past.push(snapshot()); restore(future.pop()); },
     clear() { past.length = 0; future.length = 0; updateHistoryButtons(); },
+    serialize() { return structuredClone({ past, future }); },
+    hydrate(saved) { past.splice(0, past.length, ...saved.past); future.splice(0, future.length, ...saved.future); updateHistoryButtons(); },
     get canUndo() { return past.length > 0; }, get canRedo() { return future.length > 0; },
   };
 }
@@ -444,15 +516,16 @@ function snapshot() {
   return structuredClone({ settings: Object.fromEntries(Object.keys(defaults).map(key => [key, state[key]])), tabLayouts: state.tabLayouts });
 }
 function restore(saved) {
-  cancelAnimationFrame(renderFrame); pendingSettings = null;
+  cancelAnimationFrame(renderFrame); pendingSettings = null; positionGesture = null;
   Object.assign(state, saved.settings); state.tabLayouts = structuredClone(saved.tabLayouts);
   state.selectedTab = null; state.adding = false;
   syncSettingInputs(); render(); updateHistoryButtons();
 }
 function updateHistoryButtons() {
   $('#undo').disabled = !history.canUndo; $('#redo').disabled = !history.canRedo;
+  queueWorkspaceSave();
 }
-function commitSettings() { if (pendingSettings) { history.record(pendingSettings); pendingSettings = null; } }
+function commitSettings() { positionGesture = null; if (pendingSettings) { history.record(pendingSettings); pendingSettings = null; } queueWorkspaceSave(); }
 function mutate(action) {
   commitSettings(); cancelAnimationFrame(renderFrame);
   const before = snapshot(); action(); render(); history.record(before);
@@ -509,5 +582,84 @@ $('#help').addEventListener('click', () => $('#help-dialog').showModal());
 for (const id of ['close-help', 'got-it']) $(`#${id}`).addEventListener('click', () => $('#help-dialog').close());
 $('#help-dialog').addEventListener('click', e => { if (e.target === $('#help-dialog')) { const r = e.target.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) e.target.close(); } });
 new ResizeObserver(scheduleRender).observe($('#canvas-viewport'));
+let workspaceSaveTimer;
+let storageWarningShown = false;
 updateRangePaint();
-loadSource(examples.bloom.svg, examples.bloom.name, 'bloom');
+if (!restoreWorkspace()) loadSource(examples.bloom.svg, examples.bloom.name, 'bloom');
+
+// Save source SVG and editing data, rather than generated geometry or DOM nodes.
+// The optional namespace lets browser checks use their own workspace.
+function storageKey() {
+  const workspace = new URLSearchParams(location.search).get('workspace');
+  return workspace ? `${workspaceKey}:${workspace}` : workspaceKey;
+}
+function queueWorkspaceSave() {
+  clearTimeout(workspaceSaveTimer);
+  workspaceSaveTimer = setTimeout(saveWorkspace, 150);
+}
+function saveWorkspace() {
+  clearTimeout(workspaceSaveTimer);
+  if (!state.source) return;
+  const ui = Object.fromEntries(['view', 'showTabs', 'showOriginal', 'zoom', 'editing', 'adding', 'selectedContour', 'selectedTab', 'selectedTabs', 'selectCurrentOutlineOnly'].map(key => [key, state[key]]));
+  const viewport = $('#canvas-viewport');
+  const saved = {
+    version: 1, source: state.source, name: state.name, example: state.example,
+    document: snapshot(), ui, history: history.serialize(),
+    scroll: { x: window.scrollX, y: window.scrollY, canvasX: viewport.scrollLeft, canvasY: viewport.scrollTop },
+    focus: document.activeElement?.id || null,
+  };
+  let result;
+  try { result = writeWorkspace(localStorage, saved, storageKey()); }
+  catch { result = { saved: false }; }
+  if ((!result.saved || result.historyTruncated) && !storageWarningShown) {
+    storageWarningShown = true;
+    notify(result.saved ? 'Workspace saved, but browser storage is full; older undo history could not be kept.' : 'This browser could not save your workspace. Keep this page open to retain your edits.', 'warning');
+  }
+}
+function restoreWorkspace() {
+  let saved;
+  try { saved = readWorkspace(localStorage, storageKey()); } catch { return false; }
+  if (!saved) return false;
+  try {
+    const artwork = importSvg(saved.source);
+    const contourIds = new Set(artwork.contours.map(c => c.id));
+    const selectedContour = contourIds.has(saved.ui.selectedContour) ? saved.ui.selectedContour : artwork.contours[0].id;
+    Object.assign(state, saved.document.settings, saved.ui, { artwork, source: saved.source, name: saved.name, example: saved.example, sourceWarnings: artwork.warnings, tabLayouts: saved.document.tabLayouts, selectedContour });
+    // Controls outside the SVG are persistent DOM, so synchronize them explicitly.
+    $('#filename').textContent = state.name;
+    $('#show-tabs').checked = state.showTabs;
+    $('#show-original').checked = state.showOriginal;
+    $('#selected-layer-only').checked = state.selectCurrentOutlineOnly;
+    $('#all-layers').checked = !state.selectCurrentOutlineOnly;
+    for (const view of ['material', 'cut']) {
+      $(`#${view}-view`).classList.toggle('active', state.view === view);
+      $(`#${view}-view`).setAttribute('aria-pressed', state.view === view);
+    }
+    document.querySelectorAll('[data-example]').forEach(button => button.classList.toggle('active', button.dataset.example === state.example));
+    syncSettingInputs();
+    history.hydrate(saved.history);
+    render();
+    requestAnimationFrame(() => {
+      const focus = typeof saved.focus === 'string' ? document.getElementById(saved.focus) : null;
+      focus?.focus({ preventScroll: true });
+      if (saved.scroll && Object.values(saved.scroll).every(Number.isFinite)) {
+        window.scrollTo(saved.scroll.x, saved.scroll.y);
+        $('#canvas-viewport').scrollTo(saved.scroll.canvasX, saved.scroll.canvasY);
+      }
+    });
+    return true;
+  } catch { return false; }
+}
+function flushWorkspace() {
+  const active = document.activeElement;
+  if (active instanceof HTMLInputElement && active.type === 'number') active.dispatchEvent(new Event('change', { bubbles: true }));
+  if (drag) finishDrag({ pointerId: drag.pointerId });
+  commitSettings();
+  saveWorkspace();
+}
+window.addEventListener('stencil:before-reload', flushWorkspace);
+window.addEventListener('pagehide', flushWorkspace);
+window.addEventListener('beforeunload', flushWorkspace);
+window.addEventListener('scroll', queueWorkspaceSave, { passive: true });
+$('#canvas-viewport').addEventListener('scroll', queueWorkspaceSave, { passive: true });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushWorkspace(); });

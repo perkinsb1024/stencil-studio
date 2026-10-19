@@ -7,7 +7,7 @@
     "dev": "node scripts/serve.js",
     "preview": "node scripts/serve.js dist",
     "build": "node scripts/build.js",
-    "test": "node --test tests/geometry.test.js"
+    "test": "node --test tests/*.test.js"
   },
   "keywords": [],
   "author": "",

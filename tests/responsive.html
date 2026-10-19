@@ -1,8 +1,13 @@
-<!doctype html><html lang="en"><meta charset="utf-8"><title>Responsive preview checks</title><style>body{font:14px system-ui;background:#f0eaf5;color:#502c6c;padding:20px}main{display:flex;gap:25px;align-items:flex-start}iframe{border:1px solid #ccc;border-radius:10px;height:1350px;background:white}.status{font-weight:bold}</style><h1>Responsive preview checks</h1><main><section><h2>Mobile · 390 px</h2><p class="status" id="mobile-status">Checking…</p><iframe id="mobile" title="Mobile editor preview" width="390" src="/?test=mobile"></iframe></section><section><h2>Tablet · 860 px</h2><p class="status" id="tablet-status">Checking…</p><iframe id="tablet" title="Tablet editor preview" width="860" src="/?test=tablet"></iframe></section></main><script>
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Responsive preview checks</title><style>body{font:14px system-ui;background:#f0eaf5;color:#502c6c;padding:20px}main{display:flex;gap:25px;align-items:flex-start}iframe{border:1px solid #ccc;border-radius:10px;height:1350px;background:white}.status{font-weight:bold}</style><h1>Responsive preview checks</h1><main><section><h2>Mobile · 390 px</h2><p class="status" id="mobile-status">Checking…</p><iframe id="mobile" title="Mobile editor preview" width="390" src="/?workspace=responsive-mobile&live-reload=off"></iframe></section><section><h2>Tablet · 860 px</h2><p class="status" id="tablet-status">Checking…</p><iframe id="tablet" title="Tablet editor preview" width="860" src="/?workspace=responsive-tablet&live-reload=off"></iframe></section></main><script>
 for (const name of ['mobile','tablet']) {
  const frame = document.getElementById(name);
+ localStorage.removeItem('stencil-studio.workspace.v1:responsive-'+name);
  frame.addEventListener('load', async () => {
   const w=frame.contentWindow,d=frame.contentDocument;
+  if (new URLSearchParams(location.search).has('headless')) {
+   w.requestAnimationFrame=callback=>w.setTimeout(()=>callback(w.performance.now()),16);
+   w.cancelAnimationFrame=id=>w.clearTimeout(id);
+  }
   const settle=()=>new Promise(resolve=>w.requestAnimationFrame(()=>w.requestAnimationFrame(resolve)));
   const valid=()=>d.documentElement.scrollWidth<=w.innerWidth && !!d.querySelector('.cut-shape')?.getAttribute('d');
   let pass=valid();

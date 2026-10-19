@@ -1,0 +1,137 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Workspace and live update checks</title>
+<style>body{font:14px system-ui;padding:24px;color:#502c6c}li{margin:8px 0}.fail{color:#a00}iframe{width:1100px;height:1300px;border:1px solid #ddd}#summary{font-weight:bold}</style></head><body>
+<h1>Workspace and live update checks</h1><p id="summary">Running…</p><ol id="results"></ol><iframe title="Workspace editor"></iframe>
+<script type="module">
+const key = 'stencil-studio.workspace.v1:workspace-tests';
+const frame = document.querySelector('iframe');
+localStorage.removeItem(key);
+let d, w;
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const $ = selector => d.querySelector(selector);
+function assert(value, message = 'Unexpected result') { if (!value) throw new Error(message); }
+async function check(name, action) {
+  const li = document.createElement('li');
+  try { await action(); li.textContent = `PASS — ${name}`; }
+  catch (error) { li.textContent = `FAIL — ${name}: ${error.message}`; li.className = 'fail'; }
+  document.querySelector('#results').append(li);
+}
+function bind() {
+  d = frame.contentDocument; w = frame.contentWindow;
+  if (new URLSearchParams(location.search).has('headless')) {
+    w.requestAnimationFrame = callback => w.setTimeout(() => callback(w.performance.now()), 16);
+    w.cancelAnimationFrame = id => w.clearTimeout(id);
+  }
+}
+async function load(action) {
+  await new Promise(resolve => { frame.addEventListener('load', resolve, { once: true }); action(); });
+  bind(); await sleep(80);
+}
+async function click(selector) { $(selector).click(); await sleep(50); }
+async function change(selector, value) { $(selector).value = value; $(selector).dispatchEvent(new w.Event('change', { bubbles: true })); await sleep(50); }
+function flush() { w.dispatchEvent(new w.Event('stencil:before-reload')); }
+const selected = () => [...d.querySelectorAll('.tab-marker[aria-pressed="true"]')].map(m => `${m.dataset.outline}/${m.dataset.tab}`);
+const cuts = () => $('.cut-shape').getAttribute('d');
+await load(() => { frame.src = '/?workspace=workspace-tests&live-reload=off'; });
+let expectedCuts, expectedSelection, anchorId;
+await check('Uploaded artwork, settings, group edits and view survive a reload', async () => {
+  const source = '<svg xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="100" height="100"/><circle cx="50" cy="50" r="25"/></svg>';
+  const transfer = new w.DataTransfer(); transfer.items.add(new w.File([source], 'persistent.svg', { type: 'image/svg+xml' }));
+  $('#file-input').files = transfer.files; $('#file-input').dispatchEvent(new w.Event('change'));
+  for (let i = 0; i < 50 && $('#filename').textContent !== 'persistent.svg'; i++) await sleep(20);
+  assert($('#filename').textContent === 'persistent.svg');
+  await change('#artworkWidth', 180); await change('#channelWidth', 2.4);
+  await click('#edit-tabs'); await click('#all-layers');
+  await change('#tab-picker', 'auto-0');
+  const second = d.querySelector('.tab-marker[data-outline="outline-1"][data-tab="auto-1"]');
+  const hit = second.querySelector('rect');
+  const p = new w.DOMPoint(Number(hit.getAttribute('x')), Number(hit.getAttribute('y'))).matrixTransform($('#preview-svg').getScreenCTM());
+  second.dispatchEvent(new w.PointerEvent('pointerdown', { pointerId: 3, clientX: p.x, clientY: p.y, button: 0, shiftKey: true, bubbles: true }));
+  $('#preview-svg').dispatchEvent(new w.PointerEvent('pointerup', { pointerId: 3, bubbles: true }));
+  assert(selected().length === 2);
+  await change('#selected-tab-width', 6); await change('#selected-tab-position', 20);
+  await click('#zoom-in'); await click('#cut-view'); await click('#show-original');
+  expectedCuts = cuts(); expectedSelection = selected(); anchorId = $('#tab-picker').value; flush();
+  assert(JSON.parse(localStorage.getItem(key)).source === source);
+  await load(() => w.location.reload());
+  assert($('#filename').textContent === 'persistent.svg');
+  assert($('#artworkWidth').value === '180' && $('#channelWidth').value === '2.4');
+  assert($('#selected-tab-width').value === '6' && $('#selected-tab-position').value === '20');
+  assert($('#zoom-label').textContent === '125%');
+  assert($('#cut-view').getAttribute('aria-pressed') === 'true' && $('#show-original').checked);
+  assert($('#all-layers').checked && !$('#tab-inspector').hidden);
+  assert(JSON.stringify(selected()) === JSON.stringify(expectedSelection));
+  assert(cuts() === expectedCuts, 'Generated cuts changed during reload');
+  assert(!$('#undo').disabled);
+});
+await check('A slider gesture pending at reload is saved as one undo step', async () => {
+  for (const value of [7, 8, 9]) {
+    $('#selected-tab-width-range').value = value; $('#selected-tab-width-range').dispatchEvent(new w.Event('input')); await sleep(40);
+  }
+  // No change/blur event: the reload hook must commit this pending gesture.
+  flush(); await load(() => w.location.reload());
+  assert($('#selected-tab-width').value === '9');
+  await click('#undo');
+  await change('#tab-picker', anchorId);
+  assert($('#selected-tab-width').value === '6', 'Undo did not restore the whole gesture');
+  assert(!$('#redo').disabled);
+});
+await check('Redo history survives reload, and reopening keeps the workspace', async () => {
+  flush(); await load(() => w.location.reload());
+  assert(!$('#redo').disabled);
+  await click('#redo'); await change('#tab-picker', anchorId);
+  assert($('#selected-tab-width').value === '9');
+  const before = cuts(); flush();
+  await load(() => { frame.src = 'about:blank'; });
+  await load(() => { frame.src = '/?workspace=workspace-tests&live-reload=off'; });
+  assert($('#filename').textContent === 'persistent.svg' && cuts() === before);
+});
+await check('A number typed without blurring is committed before reload', async () => {
+  $('#channelWidth').focus(); $('#channelWidth').value = '3.1';
+  flush(); await load(() => w.location.reload());
+  assert($('#channelWidth').value === '3.1');
+  await click('#undo'); assert($('#channelWidth').value === '2.4');
+});
+await check('A drag pending at reload keeps its position and undo history', async () => {
+  await change('#tab-picker', anchorId);
+  const before = Number($('#selected-tab-position').value);
+  const marker = d.querySelector('.tab-marker.selected');
+  const circle = marker.querySelector('circle');
+  const start = new w.DOMPoint(Number(circle.getAttribute('cx')), Number(circle.getAttribute('cy'))).matrixTransform($('#preview-svg').getScreenCTM());
+  const path = [...d.querySelectorAll('.outline-hit-targets path')].find(p => p.dataset.outline === $('#outline-picker').value);
+  const target = path.getPointAtLength(path.getTotalLength() * 0.48).matrixTransform($('#preview-svg').getScreenCTM());
+  marker.dispatchEvent(new w.PointerEvent('pointerdown', { pointerId: 4, clientX: start.x, clientY: start.y, button: 0, bubbles: true }));
+  $('#preview-svg').dispatchEvent(new w.PointerEvent('pointermove', { pointerId: 4, clientX: target.x, clientY: target.y, bubbles: true }));
+  flush(); await load(() => w.location.reload());
+  assert(Math.abs(Number($('#selected-tab-position').value) - 48) < 0.02);
+  await click('#undo'); await change('#tab-picker', anchorId);
+  assert(Math.abs(Number($('#selected-tab-position').value) - before) < 0.02);
+});
+await check('Invalid saved data falls back to a usable default workspace', async () => {
+  await load(() => { frame.src = 'about:blank'; });
+  localStorage.setItem(key, '{invalid JSON');
+  await load(() => { frame.src = '/?workspace=workspace-tests&live-reload=off'; });
+  assert($('#filename').textContent === 'Bloom.svg'); assert(cuts());
+});
+await check('CSS updates replace the stylesheet without replacing the document', async () => {
+  const fixture = document.createElement('iframe'); fixture.title = 'Live CSS test'; document.body.append(fixture);
+  const loaded = new Promise(resolve => fixture.addEventListener('load', resolve, { once: true }));
+  fixture.srcdoc = `<!doctype html><html><head><link rel="stylesheet" href="/src/style.css"></head><body><input id="retained" value="keep my edits"><script>window.EventSource = class extends EventTarget { constructor() { super(); window.devEvents = this; } };<\/script><script type="module" src="/__dev/client.js"><\/script></body></html>`;
+  await loaded;
+  const doc = fixture.contentDocument, original = doc.querySelector('link'), input = doc.querySelector('input');
+  input.value = 'unsaved work';
+  fixture.contentWindow.devEvents.dispatchEvent(new fixture.contentWindow.MessageEvent('change', { data: JSON.stringify({ paths: ['/src/style.css'] }) }));
+  for (let i = 0; i < 100 && original.isConnected; i++) await sleep(20);
+  assert(!original.isConnected, 'Stylesheet was not swapped');
+  assert(doc === fixture.contentDocument && doc.querySelector('input') === input && input.value === 'unsaved work');
+  assert(new URL(doc.querySelector('link').href).searchParams.has('dev-update'));
+  let willSave = false, reloaded = false;
+  fixture.contentWindow.addEventListener('stencil:before-reload', () => { willSave = true; });
+  fixture.addEventListener('load', () => { reloaded = true; }, { once: true });
+  fixture.contentWindow.devEvents.dispatchEvent(new fixture.contentWindow.MessageEvent('change', { data: JSON.stringify({ paths: ['/src/main.js'] }) }));
+  for (let i = 0; i < 100 && !reloaded; i++) await sleep(20);
+  assert(willSave && reloaded, 'JavaScript update did not save before reloading');
+  fixture.remove();
+});
+const failures = document.querySelectorAll('.fail').length;
+document.querySelector('#summary').textContent = `${document.querySelectorAll('li:not(.fail)').length} passed; ${failures} failed.`;
+</script></body></html>

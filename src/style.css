@@ -349,3 +349,14 @@ select{
 }
 .tab-inspector select{padding-right:36px}
 @media(forced-colors:active){select,.tab-inspector select{appearance:auto;-webkit-appearance:auto;background-image:none}}
+
+#tab-selection-box{fill:#258477;fill-opacity:0.12;stroke:#258477;stroke-width:1;stroke-dasharray:4 3;vector-effect:non-scaling-stroke;pointer-events:none}
+
+.selection-scope{border:0;padding:0;margin:0 0 12px;min-width:0;font-size:12px;line-height:18px}
+.selection-scope legend{padding:0;margin-bottom:6px;color:#80718d}
+.selection-scope-options{display:grid;grid-template-columns:1fr 1fr;gap:3px;width:fit-content;max-width:100%;padding:3px;border-radius:7px;background:#e8e4ed}
+.selection-scope-options label{position:relative;cursor:pointer;min-width:0}
+.selection-scope-options input{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.selection-scope-options span{display:block;text-align:center;padding:6px 12px;border-radius:4px;color:#80718d;transition:background .15s,color .15s,box-shadow .15s}
+.selection-scope-options input:checked+span{background:#fff;color:#4a375a;box-shadow:0 1px 3px #23192c26}
+.selection-scope-options input:focus-visible+span{outline:2px solid #826b94;outline-offset:2px}
