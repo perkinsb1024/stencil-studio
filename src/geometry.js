@@ -85,7 +85,7 @@ export function generateStencil(contours, options) {
       pieces.push({ points: [...last.points, ...first.points.slice(1)], start: last.start, end: first.end });
     }
     const profile = createChannelWidthProfile(contourId, options);
-    for (const piece of pieces) ribbons.push(...channelPaths(piece.points, closed && !tabs.length, profile, options.roundedTabs ? piece : {}));
+    for (const piece of pieces) ribbons.push(...channelPaths(piece.points, closed && !tabs.length, profile, options.roundedTabs ? piece : {}, options.roundedChannelCorners !== false));
   }
   const clipper = new ClipperLib.Clipper();
   clipper.AddPaths(ribbons, ClipperLib.PolyType.ptSubject, true);

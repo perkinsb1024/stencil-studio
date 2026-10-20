@@ -393,6 +393,29 @@ test('tapered channels keep round corners and closed seams without filling the i
   assert.equal(insideCuts(result, { x: 113, y: 7 }), 0);
 });
 
+test('channel corners can stay sharp with regional widths and either tab cap style', () => {
+  for (const vertices of [square.points.slice(0, -1), square.points.slice(0, -1).reverse()]) {
+    const contour = { ...measureContour(vertices, true), id: 'outline-0' };
+    for (const roundedTabs of [false, true]) {
+      for (const regions of [[], [region(rect(0, 0, 30, 30), 1)]]) {
+        const settings = { ...options, roundedTabs, regions };
+        const radius = regions.length ? 0.5 : 1;
+        const point = { x: 10 - radius * 0.9, y: 10 - radius * 0.9 };
+        const rounded = generateStencil([contour], settings);
+        const sharp = generateStencil([contour], { ...settings, roundedChannelCorners: false });
+        assert.equal(insideCuts(rounded, point), 0);
+        assert.equal(insideCuts(sharp, point), 1);
+        assert.equal(insideCuts(sharp, { x: 60, y: 60 }), 0);
+        for (const bridge of sharp.bridges) assert.equal(insideCuts(sharp, bridge.point), 0);
+      }
+    }
+  }
+  const sharpClosed = generateStencil([square], { ...options, tabCount: 0, roundedChannelCorners: false });
+  assert.equal(sharpClosed.paths.length, 2);
+  assert.equal(insideCuts(sharpClosed, { x: 9.1, y: 9.1 }), 1);
+  assert.equal(insideCuts(sharpClosed, { x: 60, y: 60 }), 0);
+});
+
 test('regional widths on sampled curves leave continuous boundaries without hairline slits', () => {
   const points = Array.from({ length: 96 }, (_, i) => ({ x: 50 + 30 * Math.cos(i * Math.PI / 48), y: 50 + 30 * Math.sin(i * Math.PI / 48) }));
   for (const vertices of [points, points.toReversed()]) {

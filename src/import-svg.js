@@ -9,7 +9,11 @@ export function importSvg(source) {
   const doc = new DOMParser().parseFromString(source, 'image/svg+xml');
   if (doc.querySelector('parsererror') || doc.documentElement.localName !== 'svg') throw new Error('This file is not a valid SVG. Try exporting it again from your drawing app.');
   const warnings = [];
-  if (doc.querySelector('text')) throw new Error('This SVG contains live text. Convert text to paths in your drawing app, then upload it again.');
+  const description = [...doc.querySelectorAll('title, desc, text')].map(el => el.textContent.trim()).filter(Boolean).join(' · ');
+  if (doc.querySelector('text')) {
+    if (!doc.querySelector('path, rect, circle, ellipse, line, polyline, polygon, use')) throw new Error('This SVG contains live text. Convert text to paths in your drawing app, then upload it again.');
+    warnings.push('Live text was skipped. Convert text to paths first if you want to cut the lettering.');
+  }
   if (doc.querySelector('image')) warnings.push('Embedded images were skipped. Only vector outlines can become cut paths.');
   if (doc.querySelector('clipPath, mask')) throw new Error('This SVG uses clipping or masks. Flatten these to paths in your drawing app before importing.');
   for (const el of [...doc.querySelectorAll('*')]) {
@@ -55,10 +59,17 @@ export function importSvg(source) {
   if (!contours.length) throw new Error('No vector outlines found. Upload an SVG containing paths or shapes.');
   if (contours.length > 500) throw new Error('This SVG has more than 500 contours. Simplify it or split it into smaller files.');
   const all = contours.flatMap(c => c.points);
-  const bounds = all.reduce((b, p) => ({ minX: Math.min(b.minX, p.x), minY: Math.min(b.minY, p.y), maxX: Math.max(b.maxX, p.x), maxY: Math.max(b.maxY, p.y) }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+  let bounds = all.reduce((b, p) => ({ minX: Math.min(b.minX, p.x), minY: Math.min(b.minY, p.y), maxX: Math.max(b.maxX, p.x), maxY: Math.max(b.maxY, p.y) }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+  // Our simplifier retains the original coordinate frame so removing a small
+  // island cannot unexpectedly enlarge or shift the remaining artwork.
+  const frame = doc.documentElement.getAttribute('data-stencil-frame')?.trim().split(/\s+/).map(Number);
+  if (frame?.length === 4 && frame.every(Number.isFinite)) {
+    const [x, y, width, height] = frame;
+    if (width > 0 && height >= 0 && x <= bounds.minX + 0.0001 && y <= bounds.minY + 0.0001 && x + width >= bounds.maxX - 0.0001 && y + height >= bounds.maxY - 0.0001) bounds = { minX: x, minY: y, maxX: x + width, maxY: y + height };
+  }
   if (bounds.maxX - bounds.minX < 0.0001) throw new Error('The artwork needs a nonzero width. Rotate vertical lines or include a wider shape.');
   if (contours.some(c => !c.closed)) warnings.push('Open paths are included as channels with square ends.');
-  return { contours, bounds, warnings };
+  return { contours, bounds, warnings, description };
 }
 
 export function scaleArtwork(artwork, width, padding) {

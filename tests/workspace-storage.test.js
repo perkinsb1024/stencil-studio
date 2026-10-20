@@ -111,3 +111,31 @@ test('rounded tab setting survives storage and validates mixed old/new history',
     assert.equal(readWorkspace(store), null);
   }
 });
+
+test('artwork replacements retain per-snapshot sources and metadata across mixed-version history', () => {
+  const store = storage();
+  const old = { ...document, source: '<svg><path d="M0 0H10V10Z"/></svg>', name: 'Before.svg', example: '' };
+  const current = { ...old, source: '<svg><path d="M0 0H20V20Z"/></svg>', name: 'After.svg' };
+  const saved = { ...workspace, source: current.source, name: current.name, document: current, history: { past: [document, old], future: [current] } };
+  writeWorkspace(store, saved);
+  assert.deepEqual(readWorkspace(store), saved);
+  for (const invalid of [{ ...old, source: 123 }, { ...old, name: null }, { ...old, example: {} }]) {
+    store.setItem(workspaceKey, JSON.stringify({ ...saved, history: { past: [invalid], future: [] } }));
+    assert.equal(readWorkspace(store), null);
+  }
+});
+
+test('live preview pan offsets round trip and legacy workspaces remain valid', () => {
+  const store = storage();
+  const panned = { ...workspace, ui: { ...workspace.ui, panX: -72.5, panY: 36 } };
+  writeWorkspace(store, panned);
+  assert.deepEqual(readWorkspace(store), panned);
+  writeWorkspace(store, workspace);
+  assert.deepEqual(readWorkspace(store), workspace);
+  for (const offset of [null, '20', 1_000_001, -1_000_001]) {
+    for (const key of ['panX', 'panY']) {
+      store.setItem(workspaceKey, JSON.stringify({ ...workspace, ui: { ...workspace.ui, [key]: offset } }));
+      assert.equal(readWorkspace(store), null);
+    }
+  }
+});

@@ -52,7 +52,7 @@ function samplePath(points, profile) {
   return sampled;
 }
 
-export function channelPaths(points, closed, profile, caps = {}) {
+export function channelPaths(points, closed, profile, caps = {}, roundedCorners = true) {
   let sampled = samplePath(points, profile);
   const rounded = !closed && (caps.start || caps.end);
   let startDepth = 0, endDepth = 0;
@@ -85,7 +85,7 @@ export function channelPaths(points, closed, profile, caps = {}) {
   const [minWidth, maxWidth] = sampled.reduce(([min, max], p) => [Math.min(min, p.width), Math.max(max, p.width)], [Infinity, -Infinity]);
   if (!rounded && maxWidth - minWidth < 1e-7) {
     const offset = new ClipperLib.ClipperOffset(2, SCALE * 0.015);
-    offset.AddPath((closed ? points.slice(0, -1) : points).map(p => ({ X: Math.round(p.x * SCALE), Y: Math.round(p.y * SCALE) })), ClipperLib.JoinType.jtRound, closed ? ClipperLib.EndType.etClosedLine : ClipperLib.EndType.etOpenButt);
+    offset.AddPath((closed ? points.slice(0, -1) : points).map(p => ({ X: Math.round(p.x * SCALE), Y: Math.round(p.y * SCALE) })), roundedCorners ? ClipperLib.JoinType.jtRound : ClipperLib.JoinType.jtMiter, closed ? ClipperLib.EndType.etClosedLine : ClipperLib.EndType.etOpenButt);
     const solution = new ClipperLib.Paths();
     offset.Execute(solution, sampled[0].width / 2 * SCALE);
     return solution;
@@ -110,6 +110,22 @@ export function channelPaths(points, closed, profile, caps = {}) {
     if (Math.abs(turn) < 1e-8) return;
     const side = turn > 0 ? -1 : 1;
     const start = Math.atan2(before.x * side, -before.y * side), radius = point.width / 2;
+    const offset = (direction, sign) => ({ x: point.x - direction.y * radius * sign, y: point.y + direction.x * radius * sign });
+    if (!roundedCorners) {
+      const a = offset(before, side), b = offset(after, side);
+      const cosine = Math.cos(turn / 2);
+      const middle = start + turn / 2;
+      const anchor = { x: point.x - Math.cos(middle) * radius / 2, y: point.y - Math.sin(middle) * radius / 2 };
+      if (cosine >= 0.5) {
+        add([anchor, a, { x: point.x + Math.cos(middle) * radius / cosine, y: point.y + Math.sin(middle) * radius / cosine }, b]);
+      } else {
+        // Match Clipper's miter limit: trim very acute tips with straight edges.
+        const extension = radius * Math.tan(Math.abs(turn) / 4);
+        add([anchor, a, { x: a.x + before.x * extension, y: a.y + before.y * extension },
+          { x: b.x - after.x * extension, y: b.y - after.y * extension }, b]);
+      }
+      return;
+    }
     const count = Math.max(1, Math.ceil(Math.abs(turn) / (2 * Math.acos(Math.max(-1, 1 - 0.015 / radius)))));
     const arc = Array.from({ length: count + 1 }, (_, i) => {
       const angle = start + turn * i / count;
@@ -120,7 +136,6 @@ export function channelPaths(points, closed, profile, caps = {}) {
     // that center to Clipper's integer grid can open a slit all the way into
     // the channel. Move the fan's anchor inside both strips, and use their
     // exact offset endpoints for the arc.
-    const offset = (direction, sign) => ({ x: point.x - direction.y * radius * sign, y: point.y + direction.x * radius * sign });
     arc[0] = offset(before, side);
     arc[arc.length - 1] = offset(after, side);
     const middle = start + turn / 2;

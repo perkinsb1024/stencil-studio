@@ -10,9 +10,10 @@ const validRegions = value => Array.isArray(value) && value.length <= 100 && new
   isObject(r) && isRegion(r.id) && (r.contourId === null || isContour(r.contourId)) && Number.isFinite(r.width) && r.width >= 0.2 && r.width <= 12 && (r.taperLength === undefined || Number.isFinite(r.taperLength) && r.taperLength >= 0.1 && r.taperLength <= 50) && validPolygon(r.points));
 const ranges = { artworkWidth: [10, 1000], channelWidth: [0.2, 12], tabWidth: [0.5, 15], tabCount: [1, 24], tabOffset: [0, 100], margin: [0, 100] };
 function validSnapshot(value) {
-  return isObject(value) && (value.regions === undefined || validRegions(value.regions)) && ['hiddenContours', 'cutawayContours'].every(key => value[key] === undefined || isContourList(value[key])) && isObject(value.settings) && Object.entries(ranges).every(([key, [min, max]]) =>
+  return isObject(value) && (value.source === undefined || typeof value.source === 'string' && value.source.length <= 3_000_000 && typeof value.name === 'string' && (value.example === undefined || typeof value.example === 'string')) && (value.regions === undefined || validRegions(value.regions)) && ['hiddenContours', 'cutawayContours'].every(key => value[key] === undefined || isContourList(value[key])) && isObject(value.settings) && Object.entries(ranges).every(([key, [min, max]]) =>
     Number.isFinite(value.settings[key]) && value.settings[key] >= min && value.settings[key] <= max) &&
     (value.settings.roundedTabs === undefined || typeof value.settings.roundedTabs === 'boolean') &&
+    (value.settings.roundedChannelCorners === undefined || typeof value.settings.roundedChannelCorners === 'boolean') &&
     Number.isInteger(value.settings.tabCount) && isObject(value.tabLayouts) && Object.entries(value.tabLayouts).every(([id, tabs]) =>
       isContour(id) && Array.isArray(tabs) && tabs.every(tab => isObject(tab) && isTab(tab.id) && Number.isFinite(tab.position) &&
         tab.position >= 0 && tab.position <= 1 && (tab.widthOverride === null || Number.isFinite(tab.widthOverride) && tab.widthOverride >= 0.5 && tab.widthOverride <= 15)));
@@ -23,6 +24,7 @@ export function readWorkspace(storage, key = workspaceKey) {
     if (!isObject(saved) || saved.version !== 1 || typeof saved.source !== 'string' || saved.source.length > 3_000_000 ||
       typeof saved.name !== 'string' || !validSnapshot(saved.document) || !isObject(saved.ui)) return null;
     const ui = saved.ui;
+    if (['panX', 'panY'].some(key => ui[key] !== undefined && (!Number.isFinite(ui[key]) || Math.abs(ui[key]) > 1_000_000))) return null;
     // These optional fields preserve compatibility with workspaces and history
     // saved before outline visibility was editable.
     if (['editingOutlines', 'showHiddenOutlines', 'editingRegions', 'drawingRegion'].some(key => ui[key] !== undefined && typeof ui[key] !== 'boolean') ||

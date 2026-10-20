@@ -1,5 +1,6 @@
 <!doctype html><html lang="en"><meta charset="utf-8"><title>SVG import checks</title><style>body{font:16px system-ui;padding:30px;color:#502c6c}li{margin:12px 0}.fail{color:#a00}</style><h1>SVG import checks</h1><ol id="results"></ol><script src="/vendor/paper-full.min.js"></script><script src="/vendor/clipper.js"></script><script type="module">
 import { importSvg, scaleArtwork } from '/src/import-svg.js';
+import { simplifiedSvg, simplifyArtwork } from '/src/simplify-svg.js';
 const wrap = body => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">${body}</svg>`;
 function check(name, action) {
   const li = document.createElement('li');
@@ -42,6 +43,23 @@ check('Live text is rejected with an actionable error', () => {
 check('Clipping is rejected with an actionable error', () => {
   try { importSvg(wrap('<defs><clipPath id="clip"><rect width="10" height="10"/></clipPath></defs><rect width="100" height="100" clip-path="url(#clip)"/>')); throw new Error('Clipping was accepted'); }
   catch(error) { assert(error.message.includes('Flatten')); }
+});
+check('Vector artwork with text credits imports with a notice and preserves metadata', () => {
+  const a = importSvg(wrap('<rect width="100" height="50"/><text y="180">Created by Artist &amp; Co</text>'));
+  assert(a.contours.length === 1 && a.warnings.some(w => w.includes('Live text was skipped')));
+  assert(a.description.includes('Created by Artist & Co'));
+  const output = simplifiedSvg(simplifyArtwork(a, { width: 150, tolerance: 0.1 }));
+  assert(output.includes('Created by Artist &amp; Co') && !output.includes('<text'));
+  assert(importSvg(output).description === a.description);
+});
+check('Simplified artwork retains scale and position when edge islands disappear', () => {
+  const source = importSvg(wrap('<rect x="20" y="30" width="50" height="30"/><rect x="90" y="30" width="1" height="1"/>'));
+  const simplified = simplifyArtwork(source, { width: 71, breakWidth: 2, tolerance: 0.1 });
+  const restored = importSvg(simplifiedSvg(simplified));
+  assert(restored.contours.length === 1);
+  assert(near(restored.bounds.maxX - restored.bounds.minX, 71));
+  assert(near(restored.bounds.maxY - restored.bounds.minY, 30));
+  assert(near(scaleArtwork(restored, 71, 8).height, 46));
 });
 check('Malformed files are rejected', () => {
   try { importSvg('<svg><path></svg>'); throw new Error('Invalid file was accepted'); }

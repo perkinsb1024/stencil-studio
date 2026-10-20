@@ -4,6 +4,8 @@ import { importSvg, scaleArtwork, examples } from './import-svg.js';
 import { generateStencil, pathData, exportSvg } from './geometry.js';
 import { customizeContour, nearestOnContour } from './tab-layout.js';
 import { workspaceKey, readWorkspace, writeWorkspace } from './workspace-storage.js';
+import { createSimplifyEditor } from './simplify-editor.js';
+import { createPreviewPan } from './preview-pan.js';
 
 const icons = {
   upload: '<path d="M12 16V4m-4 4 4-4 4 4M4 15v5h16v-5"/>',
@@ -23,8 +25,8 @@ const icons = {
   eye: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
 };
 const icon = (name, cls = '') => `<svg class="icon ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] || ''}</svg>`;
-const defaults = { artworkWidth: 150, channelWidth: 1.5, tabWidth: 3, tabCount: 4, tabOffset: 0, margin: 8, roundedTabs: false };
-const state = { ...defaults, artwork: null, source: null, example: '', name: 'Bloom.svg', view: 'material', showTabs: true, showOriginal: false, zoom: 1, sourceWarnings: [], result: null, scaled: null, tabLayouts: {}, hiddenContours: [], cutawayContours: [], regions: [], editingRegions: false, selectedRegion: null, drawingRegion: false, regionDraft: [], regionWidth: 0.8, regionTaperLength: 5, regionScope: 'outline-0', editingOutlines: false, selectedOutlines: [], showHiddenOutlines: true, editing: false, adding: false, selectedContour: null, selectedTab: null, selectedTabs: [], selectCurrentOutlineOnly: true };
+const defaults = { artworkWidth: 150, channelWidth: 1.5, tabWidth: 3, tabCount: 4, tabOffset: 0, margin: 8, roundedTabs: false, roundedChannelCorners: true };
+const state = { ...defaults, artwork: null, source: null, example: '', name: 'Bloom.svg', view: 'material', showTabs: true, showOriginal: false, zoom: 1, panX: 0, panY: 0, sourceWarnings: [], result: null, scaled: null, tabLayouts: {}, hiddenContours: [], cutawayContours: [], regions: [], editingRegions: false, selectedRegion: null, drawingRegion: false, regionDraft: [], regionWidth: 0.8, regionTaperLength: 5, regionScope: 'outline-0', editingOutlines: false, selectedOutlines: [], showHiddenOutlines: true, editing: false, adding: false, selectedContour: null, selectedTab: null, selectedTabs: [], selectCurrentOutlineOnly: true };
 const $ = s => document.querySelector(s);
 const outlineThumbnails = new WeakMap();
 
@@ -41,6 +43,7 @@ document.querySelector('#app').innerHTML = `
           <input type="file" id="file-input" accept=".svg,image/svg+xml" hidden />
           <button class="upload-zone" id="upload">${icon('upload')}<strong>Drop your SVG here</strong><span>or click to browse · up to 3 MB</span></button>
           <div class="current-file">${icon('file')}<div><strong id="filename">Bloom.svg</strong><span id="source-info">2 vector contours</span></div><span class="file-check">${icon('check')}</span></div>
+          <button id="simplify-artwork" class="small-button simplify-launch" aria-haspopup="dialog" aria-controls="simplify-dialog">Simplify SVG ${icon('arrow')}</button>
           <div class="examples"><span>Try a sample</span><button data-example="bloom" class="active" title="Bloom example">Bloom</button><button data-example="orbit" title="Orbit example">Orbit</button><button data-example="arch" title="Arch example">Arch</button></div>
         </section>
         <section class="control-section"><div class="section-heading"><span class="step">02</span><h2>Shape your stencil</h2><button class="icon-button reset" id="reset" title="Reset settings" aria-label="Reset settings">${icon('reset')}</button></div>
@@ -51,7 +54,8 @@ document.querySelector('#app').innerHTML = `
           <div class="control"><div class="control-label"><label for="tabCount">Automatic tabs per outline</label><div class="stepper"><button id="tabs-minus" aria-label="Fewer tabs">${icon('minus')}</button><input type="number" id="tabCount" min="1" max="24" step="1" value="4" /><button id="tabs-plus" aria-label="More tabs">${icon('plus')}</button></div></div></div>
           <div class="control position-control"><div class="control-label"><label for="tabOffset">Automatic tab position</label><output id="offset-value">0%</output></div><input type="range" id="tabOffset" min="0" max="100" step="1" value="0" aria-label="Automatic tab position" /><p class="control-hint">Slide automatic tabs around closed outlines.</p></div>
           <p class="control-hint" id="automatic-scope"></p>
-          <div class="control"><label class="check-label"><input type="checkbox" id="roundedTabs" /><span>Rounded tab ends</span></label><p class="control-hint">Round the cut-channel ends beside tabs, keeping the tab gap.</p></div>
+          <div class="control"><div class="control-label"><span class="shape-setting-label" id="tab-ends-label">Tab ends</span><div class="view-switch shape-setting" role="group" aria-labelledby="tab-ends-label"><button type="button" data-shape-setting="roundedTabs" data-rounded="true" aria-pressed="false">Rounded</button><button type="button" data-shape-setting="roundedTabs" data-rounded="false" aria-pressed="true" class="active">Sharp</button></div></div><p class="control-hint">Shape the cut-channel ends beside tabs, keeping the tab gap.</p></div>
+          <div class="control"><div class="control-label"><span class="shape-setting-label" id="channel-corners-label">Channel corners</span><div class="view-switch shape-setting" role="group" aria-labelledby="channel-corners-label"><button type="button" data-shape-setting="roundedChannelCorners" data-rounded="true" aria-pressed="true" class="active">Rounded</button><button type="button" data-shape-setting="roundedChannelCorners" data-rounded="false" aria-pressed="false">Sharp</button></div></div></div>
           <button class="small-button" id="reset-all-tabs" disabled>Reset all to automatic</button>
 
         </section>
@@ -120,9 +124,10 @@ document.querySelector('#app').innerHTML = `
           </div>
           <div class="canvas-bottom-bar">
             <div class="canvas-label"><span class="status-dot"></span> LIVE VECTOR PREVIEW</div>
-            <div class="zoom-controls"><button id="zoom-out" aria-label="Zoom out">${icon('minus')}</button><span id="zoom-label">100%</span><button id="zoom-in" aria-label="Zoom in">${icon('plus')}</button><span class="zoom-divider"></span><button id="zoom-fit" title="Fit to view" aria-label="Fit to view">${icon('fit')}</button></div>
+            <div class="zoom-controls"><button id="pan-preview" aria-label="Pan preview" aria-pressed="false" title="Pan tool (or hold Space and drag while editing)" disabled>Pan</button><span class="zoom-divider"></span><button id="zoom-out" aria-label="Zoom out">${icon('minus')}</button><span id="zoom-label">100%</span><button id="zoom-in" aria-label="Zoom in">${icon('plus')}</button><span class="zoom-divider"></span><button id="zoom-fit" title="Fit to view" aria-label="Fit to view">${icon('fit')}</button></div>
           </div>
         </div>
+        <p class="preview-pan-hint">Zoom in and drag to pan. While editing, choose Pan or hold Space and drag. Fit recenters.</p>
         <div class="preview-footer"><div class="legend"><span><i class="legend-cut"></i> Cut away</span><span><i class="legend-material"></i> Keep material</span><span><i class="legend-tab"></i> Automatic tab</span><span><i class="legend-custom-tab"></i> Custom tab</span></div><span id="cut-count">8 cut regions</span></div>
       </section>
     </div>
@@ -274,8 +279,13 @@ function fitSheet() {
   const wrap = $('#sheet-wrap');
   wrap.style.width = `${height * ratio}px`;
   wrap.style.height = `${height}px`;
-  wrap.style.transform = `scale(${state.zoom})`;
+  const maxX = height * ratio * Math.max(0, state.zoom - 1) / 2;
+  const maxY = height * Math.max(0, state.zoom - 1) / 2;
+  state.panX = Math.max(-maxX, Math.min(maxX, state.panX));
+  state.panY = Math.max(-maxY, Math.min(maxY, state.panY));
+  wrap.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.zoom})`;
   $('#zoom-label').textContent = `${Math.round(state.zoom * 100)}%`;
+  previewPan.refresh();
   queueWorkspaceSave();
 }
 
@@ -421,6 +431,23 @@ function updateSelectedTab(property, value, live = false) {
   else { mutate(apply); positionGesture = null; }
 }
 const regionEditor = createRegionEditor({ state, render, mutate, snapshot, restore, record: before => history.record(before), beginEdit: () => { if (!pendingSettings) pendingSettings = snapshot(); }, commit: commitSettings, save: queueWorkspaceSave, notify, svgPoint, screenUnit });
+const simplifyEditor = createSimplifyEditor({
+  state, commit: commitWorkspaceEdits, download: downloadFile,
+  apply(source) {
+    const artwork = importSvg(source);
+    mutate(() => {
+      state.artwork = artwork; state.source = source; state.sourceWarnings = artwork.warnings;
+      state.name = state.name.replace(/(?:-simplified)?\.svg$/i, '') + '-simplified.svg'; state.example = '';
+      state.tabLayouts = {}; state.hiddenContours = []; state.cutawayContours = []; state.regions = [];
+      state.selectedRegion = null; state.drawingRegion = false; state.regionDraft = [];
+      state.selectedOutlines = []; state.selectedTabs = []; state.selectedContour = artwork.contours[0].id; state.selectedTab = null;
+      state.adding = false;
+      syncSourceInputs();
+    });
+    notify('Simplified artwork applied. Undo restores the previous SVG and edits.');
+  },
+});
+$('#simplify-artwork').addEventListener('click', () => simplifyEditor.open());
 function toggleEditing(mode) {
   regionEditor.finishGesture();
   if (drag) finishDrag({ pointerId: drag.pointerId }, true);
@@ -512,6 +539,15 @@ function showGhost(event) {
 }
 let drag = null;
 const preview = $('#preview-svg');
+const previewPan = createPreviewPan({
+  viewport: $('#canvas-viewport'), button: $('#pan-preview'),
+  enabled: () => state.zoom > 1,
+  active: () => !document.querySelector('dialog[open]'),
+  defaultDrag: () => !state.editing && !state.editingOutlines && !state.editingRegions,
+  getPosition: () => ({ x: state.panX, y: state.panY }),
+  setPosition: ({ x, y }) => { state.panX = x; state.panY = y; fitSheet(); },
+  changed: queueWorkspaceSave,
+});
 function drawSelectionBox(start, end) {
   $('#tab-selection-box')?.remove();
   const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -654,7 +690,7 @@ function loadSource(source, name, example = '') {
   try {
     const artwork = importSvg(source);
     cancelAnimationFrame(renderFrame);
-    state.artwork = artwork; state.source = source; state.example = example; state.name = name; state.sourceWarnings = artwork.warnings; state.zoom = 1;
+    state.artwork = artwork; state.source = source; state.example = example; state.name = name; state.sourceWarnings = artwork.warnings; state.zoom = 1; state.panX = state.panY = 0; previewPan.reset();
     state.tabLayouts = {}; state.hiddenContours = []; state.cutawayContours = []; state.regions = []; state.selectedRegion = null; state.drawingRegion = false; state.regionDraft = []; state.selectedOutlines = []; state.selectedTabs = []; state.selectedContour = artwork.contours[0].id; state.selectedTab = null; state.adding = false;
     history.clear(); pendingSettings = null;
     $('#filename').textContent = name;
@@ -696,10 +732,20 @@ function createHistory() {
   };
 }
 function snapshot() {
-  return structuredClone({ settings: Object.fromEntries(Object.keys(defaults).map(key => [key, state[key]])), tabLayouts: state.tabLayouts, hiddenContours: state.hiddenContours, cutawayContours: state.cutawayContours, regions: state.regions });
+  return structuredClone({ source: state.source, name: state.name, example: state.example, settings: Object.fromEntries(Object.keys(defaults).map(key => [key, state[key]])), tabLayouts: state.tabLayouts, hiddenContours: state.hiddenContours, cutawayContours: state.cutawayContours, regions: state.regions });
+}
+function syncSourceInputs() {
+  $('#filename').textContent = state.name;
+  document.querySelectorAll('[data-example]').forEach(b => b.classList.toggle('active', b.dataset.example === state.example));
 }
 function restore(saved) {
   cancelAnimationFrame(renderFrame); pendingSettings = null; positionGesture = null;
+  if (saved.source && saved.source !== state.source) {
+    state.artwork = importSvg(saved.source); state.source = saved.source;
+    state.sourceWarnings = state.artwork.warnings; state.name = saved.name; state.example = saved.example ?? '';
+    state.selectedContour = state.artwork.contours[0].id; state.selectedOutlines = []; state.selectedTabs = [];
+    syncSourceInputs();
+  }
   Object.assign(state, defaults, saved.settings); state.tabLayouts = structuredClone(saved.tabLayouts);
   state.hiddenContours = [...(saved.hiddenContours ?? [])];
   state.cutawayContours = [...(saved.cutawayContours ?? [])];
@@ -726,6 +772,11 @@ function syncSettingInputs() {
     }
     if ($(`#${key}-range`)) $(`#${key}-range`).value = state[key];
   }
+  document.querySelectorAll('[data-shape-setting]').forEach(button => {
+    const selected = state[button.dataset.shapeSetting] === (button.dataset.rounded === 'true');
+    button.classList.toggle('active', selected);
+    button.setAttribute('aria-pressed', String(selected));
+  });
   updateRangePaint();
 }
 function syncControl(key, value, live = false) {
@@ -745,7 +796,13 @@ for (const key of ['artworkWidth', 'channelWidth', 'tabWidth', 'tabCount', 'tabO
   slider?.addEventListener('input', e => syncControl(key, e.target.value, true));
 }
 function updateRangePaint() { document.querySelectorAll('input[type="range"]').forEach(el => el.style.setProperty('--range', `${(el.value - el.min) / (el.max - el.min) * 100}%`)); }
-$('#roundedTabs').addEventListener('change', e => mutate(() => { state.roundedTabs = e.target.checked; }));
+document.querySelectorAll('[data-shape-setting]').forEach(button => {
+  button.addEventListener('click', () => {
+    const key = button.dataset.shapeSetting, rounded = button.dataset.rounded === 'true';
+    if (state[key] === rounded) return;
+    mutate(() => { state[key] = rounded; syncSettingInputs(); });
+  });
+});
 $('#tabs-minus').addEventListener('click', () => syncControl('tabCount', state.tabCount - 1));
 $('#tabs-plus').addEventListener('click', () => syncControl('tabCount', state.tabCount + 1));
 $('#reset').addEventListener('click', () => { mutate(() => { Object.assign(state, defaults); state.tabLayouts = {}; state.selectedTab = null; syncSettingInputs(); }); notify('Stencil settings and tabs reset. Undo is available.'); });
@@ -760,7 +817,7 @@ for (const mode of ['material', 'cut']) $(`#${mode}-view`).addEventListener('cli
 });
 $('#zoom-in').addEventListener('click', () => { state.zoom = Math.min(3, state.zoom + 0.25); fitSheet(); });
 $('#zoom-out').addEventListener('click', () => { state.zoom = Math.max(0.25, state.zoom - 0.25); fitSheet(); });
-$('#zoom-fit').addEventListener('click', () => { state.zoom = 1; fitSheet(); });
+$('#zoom-fit').addEventListener('click', () => { state.zoom = 1; state.panX = state.panY = 0; previewPan.reset(); fitSheet(); });
 function downloadFile(data, type, filename) {
   const url = URL.createObjectURL(new Blob([data], { type }));
   const link = document.createElement('a'); link.href = url; link.download = filename; link.click();
@@ -808,7 +865,7 @@ function queueWorkspaceSave() {
   workspaceSaveTimer = setTimeout(saveWorkspace, 150);
 }
 function captureWorkspace() {
-  const ui = Object.fromEntries(['view', 'showTabs', 'showOriginal', 'zoom', 'editing', 'adding', 'selectedContour', 'selectedTab', 'selectedTabs', 'selectCurrentOutlineOnly', 'editingOutlines', 'selectedOutlines', 'showHiddenOutlines', 'editingRegions', 'selectedRegion', 'drawingRegion', 'regionDraft', 'regionWidth', 'regionTaperLength', 'regionScope'].map(key => [key, state[key]]));
+  const ui = Object.fromEntries(['view', 'showTabs', 'showOriginal', 'zoom', 'panX', 'panY', 'editing', 'adding', 'selectedContour', 'selectedTab', 'selectedTabs', 'selectCurrentOutlineOnly', 'editingOutlines', 'selectedOutlines', 'showHiddenOutlines', 'editingRegions', 'selectedRegion', 'drawingRegion', 'regionDraft', 'regionWidth', 'regionTaperLength', 'regionScope'].map(key => [key, state[key]]));
   const viewport = $('#canvas-viewport');
   return {
     version: 1, source: state.source, name: state.name, example: state.example,
@@ -854,7 +911,9 @@ function restoreWorkspace() {
     }
     document.querySelectorAll('[data-example]').forEach(button => button.classList.toggle('active', button.dataset.example === state.example));
     syncSettingInputs();
-    history.hydrate(saved.history);
+    // Older snapshots share the workspace source. Bind it now so Undo can
+    // cross a later artwork replacement without losing that original SVG.
+    history.hydrate(Object.fromEntries(['past', 'future'].map(key => [key, saved.history[key].map(entry => ({ source: saved.source, name: saved.name, example: saved.example ?? '', ...entry }))])));
     render();
     requestAnimationFrame(() => {
       const focus = typeof saved.focus === 'string' ? document.getElementById(saved.focus) : null;

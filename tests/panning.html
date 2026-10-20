@@ -1,0 +1,134 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Preview panning checks</title>
+<style>body{font:14px system-ui;margin:20px;color:#502c6c}li{margin:8px 0}.fail{color:#a00}iframe{width:1100px;height:1300px;border:1px solid #ddd}</style>
+<h1>Preview panning checks</h1><p id="summary">Running…</p><ol id="results"></ol><iframe title="Preview panning editor" src="about:blank"></iframe>
+<script type="module">
+const frame = document.querySelector('iframe'), key = 'stencil-studio.workspace.v1:panning-tests';
+localStorage.removeItem(key);
+let d,w;
+const $ = s => d.querySelector(s), sleep = ms => new Promise(r=>setTimeout(r,ms));
+function assert(value, message='Unexpected result') { if (!value) throw new Error(message); }
+async function check(name, action) {
+ const li=document.createElement('li');
+ try { await action(); li.textContent=`PASS — ${name}`; }
+ catch(error) { li.textContent=`FAIL — ${name}: ${error.message}`; li.className='fail'; }
+ document.querySelector('#results').append(li);
+}
+async function load(action) {
+ await new Promise(resolve=>{ frame.addEventListener('load',resolve,{once:true});action(); });
+ d=frame.contentDocument;w=frame.contentWindow;
+ if(new URLSearchParams(location.search).has('headless')) { w.requestAnimationFrame=cb=>w.setTimeout(()=>cb(w.performance.now()),16);w.cancelAnimationFrame=id=>w.clearTimeout(id); }
+ await sleep(80);
+}
+async function click(s) { $(s).click(); await sleep(35); }
+function saved() { w.dispatchEvent(new w.Event('stencil:before-reload'));return JSON.parse(localStorage.getItem(key)); }
+const position = () => {const ui=saved().ui;return {x:ui.panX,y:ui.panY};};
+const cuts = () => $('.cut-shape').getAttribute('d');
+function pointer(target,type,x,y,button=0,pointerType='mouse') {
+ target.dispatchEvent(new w.PointerEvent(type,{bubbles:true,cancelable:true,isPrimary:true,pointerType,pointerId:13,clientX:x,clientY:y,button,buttons:type==='pointerup'?0:button===1?4:1}));
+}
+function drag(target,dx,dy,{button=0,pointerType='mouse',cancel=false}={}) {
+ const r=target.getBoundingClientRect(), x=r.left+r.width/2,y=r.top+r.height/2;
+ pointer(target,'pointerdown',x,y,button,pointerType);
+ pointer(target,'pointermove',x+dx,y+dy,button,pointerType);
+ pointer(target,cancel?'pointercancel':'pointerup',x+dx,y+dy,button,pointerType);
+}
+function space(type) { $('#preview-svg').dispatchEvent(new w.KeyboardEvent(type,{bubbles:true,cancelable:true,key:' ',code:'Space'})); }
+await load(()=>{frame.src='/?workspace=panning-tests&live-reload=off';});
+let originalCuts, panned;
+await check('Live preview pans with a plain drag at higher zoom, without changing cuts or history',async()=>{
+ originalCuts=cuts();
+ assert($('#pan-preview').disabled);
+ await click('#zoom-in');await click('#zoom-in');await click('#zoom-in');await click('#zoom-in');
+ assert($('#canvas-viewport').classList.contains('pan-ready'));
+ const history=JSON.stringify(saved().history);
+ drag($('#preview-svg'),40,30);
+ panned=position();assert(panned.x===40&&panned.y===30,JSON.stringify(panned));
+ assert(cuts()===originalCuts&&JSON.stringify(saved().history)===history);
+});
+await check('Live pan position survives settings redraws and workspace reload',async()=>{
+ $('#show-original').click();assert(JSON.stringify(position())===JSON.stringify(panned));
+ await load(()=>frame.contentWindow.location.reload());
+ assert(JSON.stringify(position())===JSON.stringify(panned));
+ assert($('#sheet-wrap').style.transform.includes('translate(40px, 30px)'));
+});
+await check('Cancelled panning restores its start, and dragging is clamped at the artwork edges',async()=>{
+ drag($('#preview-svg'),30,20,{cancel:true});assert(JSON.stringify(position())===JSON.stringify(panned));
+ drag($('#preview-svg'),1e6,-1e6);
+ const pos=position();assert(pos.x>0&&pos.x<1000&&pos.y<0&&pos.y>-1000,JSON.stringify(pos));
+});
+await check('Fit recenters and disables panning at 100%',async()=>{
+ await click('#zoom-fit');assert(position().x===0&&position().y===0&&$('#pan-preview').disabled);
+ drag($('#preview-svg'),40,30);assert(position().x===0&&position().y===0);
+});
+await check('Pan tool overrides outline selection and suppresses the following click',async()=>{
+ for(let i=0;i<4;i++) await click('#zoom-in');
+ await click('#edit-outlines');await click('#select-outline-0');
+ assert(!$('#canvas-viewport').classList.contains('pan-ready'));
+ await click('#pan-preview');assert($('#pan-preview').getAttribute('aria-pressed')==='true');
+ drag($('[data-visibility-outline="outline-1"]'),30,20);
+ $('[data-visibility-outline="outline-1"]').dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:1}));
+ assert(position().x===30&&position().y===20);
+ assert($('#select-outline-0').getAttribute('aria-pressed')==='true'&&$('#select-outline-1').getAttribute('aria-pressed')==='false');
+ await click('#pan-preview');
+});
+await check('Space and middle-mouse panning preserve tab layouts during editing',async()=>{
+ await click('#edit-tabs');
+ const before=JSON.stringify(saved().document.tabLayouts),start=position();
+ space('keydown');drag($('#preview-svg'),-20,10);space('keyup');
+ assert(position().x===start.x-20&&position().y===start.y+10);
+ const next=position();drag($('#preview-svg'),10,-15,{button:1});
+ assert(position().x===next.x+10&&position().y===next.y-15);
+ assert(JSON.stringify(saved().document.tabLayouts)===before);
+});
+await check('Ordinary tab dragging continues to edit the tab without panning',async()=>{
+ const before=position(), marker=$('[data-tab]'),r=marker.getBoundingClientRect();
+ const x=r.left+r.width/2,y=r.top+r.height/2;
+ pointer(marker,'pointerdown',x,y);
+ pointer($('#preview-svg'),'pointermove',x+25,y+10);
+ pointer($('#preview-svg'),'pointerup',x+25,y+10);
+ assert(JSON.stringify(position())===JSON.stringify(before));
+ assert(Object.keys(saved().document.tabLayouts).length>0,'Tab drag did not customize an outline');
+});
+await check('Space activates focused controls normally and cancels their activation when used to pan',async()=>{
+ const button=$('#zoom-in');
+ const key=type=>new w.KeyboardEvent(type,{bubbles:true,cancelable:true,key:' ',code:'Space'});
+ let down=key('keydown'),up=key('keyup');
+ button.dispatchEvent(down);button.dispatchEvent(up);
+ assert(!down.defaultPrevented&&!up.defaultPrevented,'Normal Space button activation was suppressed');
+ down=key('keydown');button.dispatchEvent(down);
+ const start=position();drag($('#preview-svg'),-10,-10);
+ up=key('keyup');button.dispatchEvent(up);
+ assert(up.defaultPrevented&&position().x===start.x-10&&position().y===start.y-10);
+});
+await check('Space-drag does not create region vertices while drawing',async()=>{
+ await click('#edit-regions');await click('#draw-region');
+ const start=position(),count=saved().ui.regionDraft.length;
+ space('keydown');drag($('#preview-svg'),10,10);space('keyup');
+ $('#preview-svg').dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:1}));
+ assert(position().x===start.x+10&&position().y===start.y+10);
+ assert(saved().ui.regionDraft.length===count);
+ await click('#cancel-region');
+});
+await check('Simplify preview pans by mouse and touch drag, preserving geometry',async()=>{
+ await click('#simplify-artwork');await click('#simplify-zoom-in');await click('#simplify-zoom-in');
+ const stage=$('#simplify-stage'), before=$('#simplify-svg').innerHTML;
+ assert(stage.classList.contains('pan-ready'));
+ drag($('#simplify-svg'),-80,-60);
+ assert(stage.scrollLeft===80&&stage.scrollTop===60,`${stage.scrollLeft}, ${stage.scrollTop}`);
+ drag($('#simplify-svg'),30,20,{pointerType:'touch'});
+ assert(stage.scrollLeft===50&&stage.scrollTop===40);
+ assert($('#simplify-svg').innerHTML===before);
+ drag($('#simplify-svg'),-20,-20,{cancel:true});assert(stage.scrollLeft===50&&stage.scrollTop===40);
+ await click('#simplify-fit');assert(stage.scrollLeft===0&&stage.scrollTop===0&&!stage.classList.contains('pan-ready'));
+ await click('#cancel-simplify');
+});
+await check('Live touch panning works on a phone and new artwork resets the view',async()=>{
+ frame.style.width='390px';await sleep(100);
+ await click('#edit-regions');await click('#zoom-fit');await click('#zoom-in');await click('#zoom-in');
+ drag($('#preview-svg'),20,15,{pointerType:'touch'});assert(position().x===20&&position().y===15);
+ assert(d.documentElement.scrollWidth<=w.innerWidth,'Mobile overflow');
+ await click('[data-example="orbit"]');assert(position().x===0&&position().y===0&&$('#zoom-label').textContent==='100%');
+});
+const fail=document.querySelectorAll('.fail').length;
+document.querySelector('#summary').textContent=`${document.querySelectorAll('#results li').length-fail} passed; ${fail} failed.`;
+</script></html>
