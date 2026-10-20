@@ -157,3 +157,18 @@ test('live preview pan offsets round trip and legacy workspaces remain valid', (
     }
   }
 });
+
+test('area suggestions and manual overrides survive mixed history and reject malformed provenance', () => {
+  const store = storage();
+  const areaSuggestions = { version: 1, artworkWidth: 150, byRegion: { 'shape-0': { mode: 'cut', confidence: 'medium', reason: 'Needs a bridge.', area: 120, perimeter: 50, overlaps: ['shape-1'] } }, warnings: ['1 unsupported material area.'] };
+  const classified = { ...document, areaSuggestions, areaOverrides: { 'shape-0': true } };
+  const saved = { ...workspace, document: classified, history: { past: [document, classified], future: [classified] } };
+  writeWorkspace(store, saved);
+  assert.deepEqual(readWorkspace(store), saved);
+  for (const invalid of [{ areaOverrides: { 'shape-0': 'true' } }, { areaOverrides: { unknown: true } }, { areaSuggestions: { ...areaSuggestions, version: 2 } }, { areaSuggestions: { ...areaSuggestions, byRegion: { 'shape-0': { ...areaSuggestions.byRegion['shape-0'], mode: 'erase' } } } }, { areaSuggestions: { ...areaSuggestions, warnings: null } }]) {
+    store.setItem(workspaceKey, JSON.stringify({ ...saved, document: { ...classified, ...invalid } }));
+    assert.equal(readWorkspace(store), null);
+    store.setItem(workspaceKey, JSON.stringify({ ...saved, history: { past: [{ ...classified, ...invalid }], future: [] } }));
+    assert.equal(readWorkspace(store), null);
+  }
+});

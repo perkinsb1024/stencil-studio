@@ -9,7 +9,12 @@ const isRegion = value => typeof value === 'string' && /^region-[a-zA-Z0-9-]+$/.
 const isShape = value => typeof value === 'string' && /^shape-\d+$/.test(value);
 const isBridge = value => typeof value === 'string' && /^bridge-[a-zA-Z0-9-]+$/.test(value);
 const validPoint = p => isObject(p) && ['x', 'y'].every(key => Number.isFinite(p[key]) && Math.abs(p[key]) <= 1000);
+const validSuggestions = value => value === undefined || value === null || isObject(value) && value.version === 1 && Number.isFinite(value.artworkWidth) && value.artworkWidth >= 10 && value.artworkWidth <= 1000 &&
+  isObject(value.byRegion) && Object.keys(value.byRegion).length <= 500 && Object.entries(value.byRegion).every(([id, s]) => isShape(id) && isObject(s) && ['outline', 'keep', 'cut', 'hidden'].includes(s.mode) && ['low', 'medium', 'high'].includes(s.confidence) && typeof s.reason === 'string' && s.reason.length <= 1000 && ['area', 'perimeter'].every(key => Number.isFinite(s[key]) && s[key] >= 0) && (s.visibleArea === undefined || Number.isFinite(s.visibleArea) && s.visibleArea >= 0) && Array.isArray(s.overlaps) && s.overlaps.length <= 500 && s.overlaps.every(isShape)) &&
+  Array.isArray(value.warnings) && value.warnings.length <= 1000 && value.warnings.every(w => typeof w === 'string' && w.length <= 2000);
 const validMaterial = value =>
+  validSuggestions(value.areaSuggestions) &&
+  (value.areaOverrides === undefined || isObject(value.areaOverrides) && Object.keys(value.areaOverrides).length <= 500 && Object.entries(value.areaOverrides).every(([id, manual]) => isShape(id) && manual === true)) &&
   (value.materialVersion === undefined || value.materialVersion === 1) &&
   (value.materialTreatments === undefined || isObject(value.materialTreatments) && Object.keys(value.materialTreatments).length <= 500 && Object.entries(value.materialTreatments).every(([key, mode]) => isShape(key) && ['outline', 'keep', 'cut'].includes(mode))) &&
   (value.materialOrder === undefined || Array.isArray(value.materialOrder) && value.materialOrder.length <= 500 && value.materialOrder.every(isShape) && new Set(value.materialOrder).size === value.materialOrder.length) &&

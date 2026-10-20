@@ -85,7 +85,7 @@ await check('Tab mode excludes hidden outlines and contains its hint with a care
   assert($('#outline-inspector').hidden && !$('#tab-inspector').hidden);
   assert($('#edit-outlines').getAttribute('aria-pressed') === 'false');
   assert($('#edit-hint').parentElement === $('#tab-inspector'));
-  assert($('#edit-hint').textContent.includes('Drag a tab along its outline'));
+  assert($('#edit-hint').textContent.includes('Drag a tab along its layer'));
   assert($('#outline-picker').options.length === 1 && $('#outline-picker').value === 'outline-1');
   assert($('#outline-picker').textContent.includes('Layer 2'), 'Outline numbering changed');
   assert(markers().length === 4 && markers().every(m => m.dataset.outline === 'outline-1'));
@@ -155,6 +155,7 @@ await check('Compound transformed paths and open outlines remain independently h
   const transfer = new w.DataTransfer(); transfer.items.add(new w.File([source], 'compound.svg', { type: 'image/svg+xml' }));
   $('#file-input').files = transfer.files; $('#file-input').dispatchEvent(new w.Event('change'));
   for (let i = 0; i < 50 && $('#filename').textContent !== 'compound.svg'; i++) await sleep(20);
+  await click('#use-all-outlines');
   assert(d.querySelectorAll('.outline-row').length === 3);
   const before = [$('#dimension-width').textContent, $('#dimension-height').textContent];
   await click('#visible-outline-1'); await click('#visible-outline-2');
@@ -188,6 +189,7 @@ await check('Detailed thumbnails preserve corners next to densely sampled sectio
   const transfer = new w.DataTransfer(); transfer.items.add(new w.File([source], 'detailed.svg', { type: 'image/svg+xml' }));
   $('#file-input').files = transfer.files; $('#file-input').dispatchEvent(new w.Event('change'));
   for (let i = 0; i < 50 && $('#filename').textContent !== 'detailed.svg'; i++) await sleep(20);
+  await click('#use-all-outlines');
   const thumbnail = $('.outline-select svg path');
   assert(thumbnail, 'Thumbnail missing');
   const length = thumbnail.getTotalLength();
@@ -244,8 +246,8 @@ await check('Open outlines keep channels, cut-aways stay out of tab editing, and
   const transfer = new w.DataTransfer(); transfer.items.add(new w.File([source], 'cutaway.svg', { type: 'image/svg+xml' }));
   $('#file-input').files = transfer.files; $('#file-input').dispatchEvent(new w.Event('change'));
   for (let i = 0; i < 50 && $('#filename').textContent !== 'cutaway.svg'; i++) await sleep(20);
-  assert($('#treatment-outline-0').value === 'outline' && [...$('#treatment-outline-1').options].filter(o => o.value !== 'outline').every(o => o.disabled));
-  await change('#treatment-outline-0', $('#treatment-outline-0').value === 'cut' ? 'outline' : 'cut'); await click('#edit-tabs');
+  assert($('#treatment-outline-0').value === 'cut' && [...$('#treatment-outline-1').options].filter(o => ['keep', 'cut'].includes(o.value)).every(o => o.disabled));
+  await click('#edit-tabs');
   assert($('#outline-picker').options.length === 1 && $('#outline-picker').value === 'outline-1');
   assert(!d.querySelector('.outline-hit-targets [data-outline="outline-0"]'));
   assert(markers().every(m => m.dataset.outline === 'outline-1'));

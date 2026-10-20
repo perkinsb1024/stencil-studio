@@ -20,7 +20,7 @@ export function importSvg(source) {
     if (!allowed.has(el.localName)) { el.remove(); continue; }
     for (const attr of [...el.attributes]) {
       const key = attr.name.toLowerCase();
-      if (key.startsWith('on') || ((key === 'href' || key === 'xlink:href') && !attr.value.startsWith('#')) || /(?:https?:|javascript:|data:|\/\/)/i.test(attr.value) && !key.startsWith('xmlns')) el.removeAttribute(attr.name);
+      if (key === 'data-paper-data' || key.startsWith('on') || ((key === 'href' || key === 'xlink:href') && !attr.value.startsWith('#')) || /(?:https?:|javascript:|data:|\/\/)/i.test(attr.value) && !key.startsWith('xmlns')) el.removeAttribute(attr.name);
     }
     if (el.localName === 'style') {
       // Retain local shape styling; disallow CSS imports and remote resources.
@@ -33,15 +33,24 @@ export function importSvg(source) {
   }
   paper.project.clear();
   let root;
-  try { root = paper.project.importSVG(doc.documentElement, { expandShapes: true, insert: false, applyMatrix: true }); }
+  const elements = [...doc.querySelectorAll('*')];
+  try { root = paper.project.importSVG(doc.documentElement, { expandShapes: true, insert: false, applyMatrix: true, onImport(node, item) {
+    const groups = [];
+    for (let parent = node.parentElement; parent && parent !== doc.documentElement; parent = parent.parentElement) {
+      if (parent.localName === 'g') groups.unshift({ id: parent.id || null, index: elements.indexOf(parent) });
+    }
+    item.data.stencilSource = { element: node.localName, id: node.id || null, index: elements.indexOf(node), groups };
+  } }); }
   catch { throw new Error('This SVG could not be read. Try exporting a plain SVG with shapes converted to paths.'); }
   const contours = [], sourceRegions = [];
-  function collect(item, inheritedVisible = true, region = null) {
-    const visible = inheritedVisible && item.visible && item.opacity > 0;
+  const paint = color => color ? (color.type === 'gradient' ? { type: 'gradient' } : { type: 'solid', color: color.toCSS(true), rgb: [color.red, color.green, color.blue], alpha: color.alpha }) : null;
+  function collect(item, inheritedVisible = true, region = null, inheritedOpacity = 1) {
+    const opacity = inheritedOpacity * item.opacity;
+    const visible = inheritedVisible && item.visible && opacity > 0;
     if (!visible) return;
     if (item instanceof paper.Path || item instanceof paper.CompoundPath) {
       if (!region) {
-        region = { id: `shape-${sourceRegions.length}`, name: item.name || `Shape ${sourceRegions.length + 1}`, fillRule: item.fillRule || 'nonzero', contourIds: [] };
+        region = { id: `shape-${sourceRegions.length}`, name: item.name || `Shape ${sourceRegions.length + 1}`, fillRule: item.fillRule || 'nonzero', contourIds: [], drawingOrder: sourceRegions.length, source: item.data.stencilSource ?? null, fill: paint(item.fillColor), stroke: paint(item.strokeColor), strokeWidth: item.strokeWidth, opacity, blendMode: item.blendMode };
         sourceRegions.push(region);
       }
     }
@@ -56,11 +65,11 @@ export function importSvg(source) {
       if (clone.segments.length > 30000) throw new Error('This artwork has too much detail. Simplify its paths before importing.');
       const points = clone.segments.map(s => ({ x: s.point.x, y: s.point.y }));
       const id = `outline-${contours.length}`;
-      contours.push({ id, points, closed: item.closed, regionId: region.id, fillRule: region.fillRule });
+      contours.push({ id, points, closed: item.closed, regionId: region.id, fillRule: region.fillRule, source: region.source });
       region.contourIds.push(id);
       clone.remove();
-    } else if (item.children) for (const child of item.children) collect(child, visible, item instanceof paper.CompoundPath ? region : null);
-    else if (item instanceof paper.SymbolItem) { const expanded = item.definition.item.clone({ insert: false }); expanded.transform(item.globalMatrix); collect(expanded); expanded.remove(); }
+    } else if (item.children) for (const child of item.children) collect(child, visible, item instanceof paper.CompoundPath ? region : null, opacity);
+    else if (item instanceof paper.SymbolItem) { const expanded = item.definition.item.clone({ insert: false }); expanded.transform(item.globalMatrix); expanded.data.stencilSource = item.data.stencilSource; collect(expanded, visible, null, opacity); expanded.remove(); }
   }
   collect(root);
   root.remove();
@@ -84,7 +93,7 @@ export function scaleArtwork(artwork, width, padding) {
   const { bounds } = artwork;
   const scale = width / (bounds.maxX - bounds.minX);
   return {
-    contours: artwork.contours.map(c => ({ ...measureContour(c.points.map(p => ({ x: (p.x - bounds.minX) * scale + padding, y: (p.y - bounds.minY) * scale + padding })), c.closed), id: c.id, regionId: c.regionId, fillRule: c.fillRule })),
+    contours: artwork.contours.map(c => ({ ...c, ...measureContour(c.points.map(p => ({ x: (p.x - bounds.minX) * scale + padding, y: (p.y - bounds.minY) * scale + padding })), c.closed) })),
     width: width + 2 * padding,
     height: (bounds.maxY - bounds.minY) * scale + 2 * padding,
     artworkHeight: (bounds.maxY - bounds.minY) * scale,

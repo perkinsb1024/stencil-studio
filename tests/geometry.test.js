@@ -105,7 +105,7 @@ test('hiding a nested outline preserves custom tabs and restores identical geome
 test('hidden outlines keep warning numbers stable and suppress their own warnings', () => {
   const contours = [identifiedSquare, { ...square, id: 'outline-1' }, { ...square, id: 'outline-2' }];
   const result = generateStencil(contours, { ...options, tabLayouts: { 'outline-0': [], 'outline-2': [] }, hiddenContours: ['outline-0', 'outline-1'] });
-  assert.deepEqual(result.warnings, ['Outline 3 has no tabs; its inner piece may come loose.']);
+  assert.deepEqual(result.warnings, ['Layer 3 has no tabs; its inner piece may come loose.']);
   assert.ok(result.bridges.every(b => b.contourId === 'outline-2'));
 });
 

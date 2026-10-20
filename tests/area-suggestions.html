@@ -1,0 +1,101 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Intelligent area checks</title>
+<style>body{font:15px system-ui;padding:24px;color:#502c6c}li{margin:10px 0}.fail{color:#b22}iframe{width:1200px;height:1200px;border:1px solid #ddd}</style>
+<h1>Intelligent area checks</h1><p id="summary">Running…</p><ol id="results"></ol><iframe id="editor" title="Stencil editor"></iframe>
+<script src="/vendor/paper-full.min.js"></script><script src="/vendor/clipper.js"></script><script type="module">
+import { importSvg } from '/src/import-svg.js';
+import { suggestAreas } from '/src/area-suggestions.js';
+const wrap = body => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">${body}</svg>`;
+const frame = document.querySelector('#editor'), key = 'stencil-studio.workspace.v1:area-suggestion-tests';
+localStorage.removeItem(key);
+let w, d;
+const $ = selector => d.querySelector(selector);
+const assert = (value, message = 'Unexpected result') => { if (!value) throw new Error(message); };
+const tick = () => new Promise(resolve => setTimeout(resolve, 50));
+const click = async selector => { $(selector).click(); await tick(); };
+const change = async (selector, value) => { $(selector).value = value; $(selector).dispatchEvent(new w.Event('change', { bubbles: true })); await tick(); };
+function flush() { w.dispatchEvent(new w.Event('stencil:before-reload')); return JSON.parse(localStorage.getItem(key)); }
+async function check(name, action) {
+  const li = document.createElement('li');
+  try { await action(); li.textContent = `PASS — ${name}`; }
+  catch (error) { li.className = 'fail'; li.textContent = `FAIL — ${name}: ${error.message}`; }
+  document.querySelector('#results').append(li);
+}
+async function load() {
+  await new Promise(resolve => { frame.onload = resolve; frame.src = '/?workspace=area-suggestion-tests&live-reload=off'; });
+  w = frame.contentWindow; d = w.document;
+  w.requestAnimationFrame = callback => w.setTimeout(() => callback(w.performance.now()), 16);
+  w.cancelAnimationFrame = id => w.clearTimeout(id);
+  await tick();
+}
+async function upload(source) {
+  const transfer = new w.DataTransfer(); transfer.items.add(new w.File([source], 'Areas.svg', { type: 'image/svg+xml' }));
+  $('#file-input').files = transfer.files; $('#file-input').dispatchEvent(new w.Event('change')); await tick(); await tick();
+}
+await check('Import retains source element, group, CSS paints, opacity, stroke, order and compound membership', () => {
+  const a = importSvg(wrap('<style>.ink{fill:#234567;stroke:white;stroke-width:2}</style><g id="details" opacity="0.5"><path id="ring" class="ink" opacity="0.5" fill-rule="evenodd" d="M10 10H90V90H10Z M30 30H70V70H30Z"/></g><rect id="box" x="10" y="10" width="10" height="10"/>'));
+  const r = a.sourceRegions[0];
+  assert(r.source.id === 'ring' && r.source.element === 'path' && r.source.groups[0].id === 'details', JSON.stringify(r.source));
+  assert(r.fill.color === '#234567' && r.stroke.color === '#ffffff' && r.strokeWidth === 2, JSON.stringify(r));
+  assert(r.opacity === 0.25 && r.fillRule === 'evenodd' && r.contourIds.length === 2);
+  assert(a.sourceRegions[1].source.id === 'box' && a.sourceRegions[1].drawingOrder === 1);
+});
+await check('Bundled nested logos stay Outline and football receives cut/keep suggestions with bridge review', async () => {
+  const { examples } = await import('/src/import-svg.js');
+  for (const name of ['bloom', 'orbit', 'arch']) {
+    const s = suggestAreas(importSvg(examples[name].svg), { artworkWidth: 150 });
+    assert(Object.values(s.byRegion).every(s => s.mode === 'outline'), name + JSON.stringify(s));
+  }
+  const s = suggestAreas(importSvg(examples.football.svg), { artworkWidth: 150 });
+  assert(s.byRegion['shape-0'].mode === 'cut', JSON.stringify(s));
+  assert(['shape-1', 'shape-2', 'shape-3'].every(id => s.byRegion[id].mode === 'keep'));
+  assert(s.warnings.some(w => w.includes('unsupported')));
+});
+await load();
+await check('New imports apply high-confidence Cut Away, Keep and Hidden with explanations', async () => {
+  await upload(wrap('<rect x="10" y="10" width="80" height="80" fill="black"/><rect x="35" y="0" width="10" height="100" fill="white"/>'));
+  await click('#edit-outlines');
+  assert($('#treatment-outline-0').value === 'cut', $('#notice').textContent);
+  assert($('#treatment-outline-1').value === 'keep');
+  assert(d.querySelectorAll('.area-suggestion').length === 2);
+  await upload(wrap('<rect x="10" y="10" width="80" height="80"/><rect x="10" y="10" width="80" height="80"/>'));
+  assert($('#treatment-outline-0').value === 'hidden');
+  assert($('#treatment-outline-1').value === 'cut');
+  assert($('#visible-outline-0').checked === false);
+});
+await check('Manual choices survive safe reapplication; reapply and use-all-outlines undo as one change', async () => {
+  await change('#treatment-outline-1', 'keep');
+  await click('#apply-area-suggestions');
+  assert($('#treatment-outline-1').value === 'keep');
+  assert(d.querySelector('.area-suggestion').textContent.includes('Manual choice'));
+  await click('#use-all-outlines');
+  assert([...d.querySelectorAll('[data-treatment-outline]')].every(el => el.value === 'outline'));
+  assert([...d.querySelectorAll('[data-visible-outline]')].every(el => el.checked));
+  await click('#undo');
+  assert($('#treatment-outline-0').value === 'hidden' && $('#treatment-outline-1').value === 'keep');
+});
+await check('Review selects uncertain geometry; explicit acceptance exposes bridge warnings and can be undone', async () => {
+  await upload(wrap('<path fill-rule="evenodd" d="M10 10H90V90H10Z M30 30H70V70H30Z"/>'));
+  assert($('#treatment-outline-0').value === 'outline', 'Donut default: ' + $('#treatment-outline-0').value + ' / ' + $('#notice').textContent);
+  await click('#review-areas');
+  assert($('#select-outline-0').getAttribute('aria-pressed') === 'true', 'Review did not select the donut');
+  assert($('#area-review-hint').textContent.includes('needs your choice'));
+  await click('#accept-area-suggestion');
+  assert($('#treatment-outline-0').value === 'cut', 'Acceptance left ' + $('#treatment-outline-0').value);
+  assert($('#notice').textContent.includes('unsupported'));
+  await click('#undo'); assert($('#treatment-outline-0').value === 'outline');
+});
+await check('Suggestions, manual overrides and their original physical size survive reload without reclassification', async () => {
+  await change('#treatment-outline-0', 'keep');
+  const before = flush();
+  await change('#artworkWidth', '200');
+  const saved = flush();
+  assert(saved.document.areaSuggestions.artworkWidth === before.document.areaSuggestions.artworkWidth, 'Size change reclassified suggestions');
+  await load();
+  const restored = flush();
+  assert($('#treatment-outline-0').value === 'keep', 'Reload treatment: ' + $('#treatment-outline-0').value);
+  assert(JSON.stringify(restored.document.areaSuggestions) === JSON.stringify(saved.document.areaSuggestions), 'Reload changed suggestion provenance');
+  assert(restored.document.areaOverrides['shape-0'], 'Reload lost override');
+});
+const failed = document.querySelectorAll('.fail').length;
+document.querySelector('#summary').textContent = `${document.querySelectorAll('li').length - failed} passed; ${failed} failed.`;
+</script></html>

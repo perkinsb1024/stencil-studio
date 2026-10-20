@@ -205,7 +205,7 @@ await check('Bridge panel and treatment controls fit a narrow preview', async ()
 });
 await check('New artwork clears treatments and bridges while original Outline tabs remain available', async () => {
   await click('[data-example="bloom"]');
-  const saved = flush(); assert(!saved.document.regionBridges.length && !Object.keys(saved.document.materialTreatments).length);
+  const saved = flush(); assert(!saved.document.regionBridges.length && Object.values(saved.document.materialTreatments).every(mode => mode === 'outline'));
   await click('#edit-tabs'); assert(!$('#tab-inspector').hidden && $('#bridge-inspector').hidden);
   assert(d.querySelectorAll('.tab-marker').length === 8);
 });

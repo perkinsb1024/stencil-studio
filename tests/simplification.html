@@ -90,6 +90,8 @@ await check('Apply replaces SVG, keeps physical size and clears previous outline
   simplified = saved();
   assert(simplified.source !== original.source && simplified.source.includes('data-stencil-frame'));
   assert(simplified.document.hiddenContours.length === 0 && simplified.document.regions.length === 0);
+  assert(simplified.document.areaSuggestions.version === 1 && simplified.document.areaSuggestions.artworkWidth === simplified.document.settings.artworkWidth);
+  assert(Object.keys(simplified.document.areaOverrides).length === 0, 'Simplification retained old manual area choices');
   assert(simplified.name === 'GreatLakes_nounProject-simplified.svg');
   assert(JSON.stringify([$('#dimension-width').textContent, $('#dimension-height').textContent]) === JSON.stringify(originalDimensions), 'Physical dimensions changed');
   assert(cuts() !== originalCuts && !$('#undo').disabled);
@@ -97,6 +99,8 @@ await check('Apply replaces SVG, keeps physical size and clears previous outline
 await check('Undo and redo restore the full source SVG and previous edits', async () => {
   await click('#undo');
   const restored = saved(); assert(restored.source === original.source && cuts() === originalCuts);
+  assert(JSON.stringify(restored.document.areaSuggestions) === JSON.stringify(original.document.areaSuggestions), 'Undo changed original suggestions');
+  assert(JSON.stringify(restored.document.areaOverrides) === JSON.stringify(original.document.areaOverrides), 'Undo lost manual area choices');
   assert(JSON.stringify(restored.document.hiddenContours) === JSON.stringify(original.document.hiddenContours));
   await click('#redo'); assert(saved().source === simplified.source);
 });
