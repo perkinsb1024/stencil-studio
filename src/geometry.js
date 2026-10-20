@@ -1,6 +1,7 @@
 import { resolveTabs } from './tab-layout.js';
 import { channelWidthAt, createChannelWidthProfile } from './regions.js';
 import { channelPaths } from './variable-channel.js';
+import { composeMaterial, materialMode } from './material-geometry.js';
 
 const ClipperLib = globalThis.ClipperLib;
 
@@ -30,6 +31,7 @@ function slice(contour, from, to) {
 }
 
 export function generateStencil(contours, options) {
+  const materialFeatures = options.sheet && (Object.values(options.materialTreatments ?? {}).some(mode => mode !== 'outline') || options.regionBridges?.length || options.analyzeMaterial);
   const { tabCount, tabLayouts = {} } = options;
   const hidden = new Set(options.hiddenContours ?? []);
   const cutaways = new Set(options.cutawayContours ?? []);
@@ -38,6 +40,7 @@ export function generateStencil(contours, options) {
   for (const [index, contour] of contours.entries()) {
     const contourId = contour.id ?? `outline-${index}`;
     if (hidden.has(contourId)) continue;
+    if (materialFeatures && materialMode(contour, options) !== 'outline') continue;
     const { length, closed } = contour;
     if (length < 0.01) continue;
     if (closed && cutaways.has(contourId)) {
@@ -53,9 +56,9 @@ export function generateStencil(contours, options) {
     const tabs = resolveTabs(contour, options, layout);
     if (!layout) reducedTabs ||= tabs.length < tabCount || tabs.some(t => t.width < t.requestedWidth - 1e-7);
     else {
-      if (!tabs.length && closed) warnings.push(`Outline ${index + 1} has no tabs; its inner piece may come loose.`);
+      if (!tabs.length && closed) warnings.push(`Layer ${index + 1} has no tabs; its inner piece may come loose.`);
       for (const tab of tabs) if (tab.width < tab.requestedWidth - 1e-7) {
-        warnings.push(`Outline ${index + 1}: a requested ${tab.requestedWidth.toFixed(1)} mm tab is ${tab.width.toFixed(1)} mm to fit the outline.`);
+        warnings.push(`Layer ${index + 1}: a requested ${tab.requestedWidth.toFixed(1)} mm tab is ${tab.width.toFixed(1)} mm to fit the layer.`);
       }
     }
     const gaps = [];
@@ -73,7 +76,7 @@ export function generateStencil(contours, options) {
     if (tabs.some((a, i) => tabs.slice(i + 1).some(b => {
       const delta = Math.abs(a.center - b.center);
       return (closed ? Math.min(delta, length - delta) : delta) < (a.gapWidth + b.gapWidth) / 2 - 1e-7;
-    }))) warnings.push(`Outline ${index + 1} has overlapping tabs; move or remove a tab to separate them.`);
+    }))) warnings.push(`Layer ${index + 1} has overlapping tabs; move or remove a tab to separate them.`);
     gaps.sort((a, b) => a[0] - b[0]);
     const intervals = [];
     let cursor = 0;
@@ -91,17 +94,19 @@ export function generateStencil(contours, options) {
   clipper.AddPaths(ribbons, ClipperLib.PolyType.ptSubject, true);
   const result = new ClipperLib.Paths();
   clipper.Execute(ClipperLib.ClipType.ctUnion, result, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
-  const paths = result.map(path => path.map(p => ({ x: p.X / SCALE, y: p.Y / SCALE })));
+  let paths = result.map(path => path.map(p => ({ x: p.X / SCALE, y: p.Y / SCALE })));
+  const material = materialFeatures ? composeMaterial(contours, paths, options) : null;
+  if (material) { paths = material.paths; warnings.push(...material.warnings); }
   if (reducedTabs) warnings.push('Some small contours have fewer or narrower tabs so there is room for the channel.');
   // Nearby outlines can cut across a bridge. Detect this rather than claiming every island is supported.
   const damaged = bridges.filter(b => {
     const point = { X: Math.round(b.point.x * SCALE), Y: Math.round(b.point.y * SCALE) };
-    const locations = result.map(poly => ClipperLib.Clipper.PointInPolygon(point, poly));
+    const locations = paths.map(poly => ClipperLib.Clipper.PointInPolygon(point, poly.map(p => ({ X: Math.round(p.x * SCALE), Y: Math.round(p.y * SCALE) }))));
     return locations.includes(-1) || locations.filter(location => location === 1).length % 2 === 1;
   });
   if (damaged.length) warnings.push(`${damaged.length} tab${damaged.length === 1 ? '' : 's'} intersect another channel${hasCutaways ? ' or full cut-away' : ''}. Try a narrower channel or change tab position; inspect before cutting.`);
   for (const bridge of bridges) bridge.channelWidth = channelWidthAt(bridge.point, bridge.contourId, options);
-  return { paths, bridges, warnings };
+  return { ...material, paths, channelCuts: result.map(path => path.map(p => ({ x: p.X / SCALE, y: p.Y / SCALE }))), bridges, warnings };
 }
 
 const num = n => Number(n.toFixed(4));
@@ -111,5 +116,5 @@ export function pathData(points, close = true) {
 
 export function exportSvg(result, width, height, title = 'Stencil') {
   const safeTitle = title.replace(/[<>&"']/g, '');
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${num(width)}mm" height="${num(height)}mm" viewBox="0 0 ${num(width)} ${num(height)}">\n<title>${safeTitle}</title>\n<desc>Closed cut paths for outline channels and full cut-aways. Gaps between channels are retaining tabs. Black areas are removed; white material remains. No outer sheet cut is included.</desc>\n<path fill="#000000" fill-rule="evenodd" stroke="none" d="${result.paths.map(p => pathData(p)).join('')}"/>\n</svg>`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${num(width)}mm" height="${num(height)}mm" viewBox="0 0 ${num(width)} ${num(height)}">\n<title>${safeTitle}</title>\n<desc>Closed cut paths for outline channels and resolved Keep/Cut Away regions. Retaining tabs and connecting bridges leave material intact. Black areas are removed; white material remains. No outer sheet cut is included.</desc>\n<path fill="#000000" fill-rule="evenodd" stroke="none" d="${result.paths.map(p => pathData(p)).join('')}"/>\n</svg>`;
 }

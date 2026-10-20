@@ -81,7 +81,7 @@ export function simplifyArtwork(artwork, { width, smooth = 0, breakWidth = 0, to
     contours = [...paths.map(path => ({ closed: true, points: path.map(p => ({ x: p.X / SCALE, y: p.Y / SCALE })) })), ...contours.filter(c => !c.closed)];
   }
   contours = contours.filter(c => c.points.length >= (c.closed ? 3 : 2)).map((c, i) => ({ ...c, id: `outline-${i}`, points: c.points.map(p => ({ x: p.x / scale + b.minX, y: p.y / scale + b.minY })) }));
-  if (contours.length > 500 || contours.some(c => c.points.length > 30000)) throw new Error('The result has too many outlines or nodes. Try more node reduction or a smaller detail radius.');
+  if (contours.length > 500 || contours.some(c => c.points.length > 30000)) throw new Error('The result has too many layers or nodes. Try more node reduction or a smaller detail radius.');
   return { contours, bounds: { ...b }, warnings: artwork.warnings ?? [], description: artwork.description ?? '' };
 }
 

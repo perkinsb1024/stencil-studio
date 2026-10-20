@@ -47,7 +47,7 @@ await check('Selected-tab card stays above the canvas without shifting it on sel
   assert(card.bottom <= before.top, 'Editor card is not above the canvas');
   assert(!$('#tab-empty-state').hidden);
   await change('#tab-picker', 'auto-0');
-  assert($('#selected-outline-label').textContent === 'Selected tab · Outline 1 · Tab 1');
+  assert($('#selected-outline-label').textContent === 'Selected tab · Layer 1 · Tab 1');
   assert($('#tab-inspector').classList.contains('has-selection'));
   assert($('#tab-empty-state').hidden);
   assert(Math.abs($('#canvas-area').getBoundingClientRect().top - before.top) < 1, 'Selecting a tab shifted the canvas');
@@ -73,7 +73,7 @@ await check('SVG stays the same size when toggling editing, placement, and outli
 await check('Removing an automatic tab freezes only its outline and can be undone/redone', async () => {
   await change('#tab-picker', 'auto-0'); await click('#remove-tab');
   assert(own().length === 3); assert($('#outline-mode').textContent === 'Custom');
-  assert($('#automatic-scope').textContent.includes('1 automatic outline'));
+  assert($('#automatic-scope').textContent.includes('1 automatic layer'));
   assert(own().every(m => m.querySelector('circle') && !m.querySelector('rect')));
   await click('#undo'); assert(own().length === 4); assert($('#outline-mode').textContent === 'Automatic');
   await click('#redo'); assert(own().length === 3);
@@ -203,7 +203,7 @@ await check('Automatic controls disable when every outline is custom, and reset-
 });
 await check('Changing the artwork clears edits and history without reusing outline edits', async () => {
   await click('[data-example="orbit"]'); assert(markers().length === 18); assert($('#undo').disabled && $('#redo').disabled);
-  assert($('#automatic-scope').textContent.includes('3 automatic outlines'));
+  assert($('#automatic-scope').textContent.includes('3 automatic layers'));
 });
 await check('Preview highlights never enter the exported cut SVG', async () => {
   let exported;

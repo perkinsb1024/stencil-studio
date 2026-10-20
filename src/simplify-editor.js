@@ -12,7 +12,7 @@ export function createSimplifyEditor({ state, commit, apply, download }) {
       <div class="simplify-layout">
         <div class="simplify-preview-column">
           <div class="simplify-preview-options">
-            <label class="check-label"><input type="checkbox" id="simplify-original" checked><span>Original outline</span></label>
+            <label class="check-label"><input type="checkbox" id="simplify-original" checked><span>Original layer</span></label>
             <label class="check-label"><input type="checkbox" id="simplify-nodes"><span>Show nodes</span></label>
             <div class="simplify-zoom"><button id="simplify-zoom-out" class="small-button" aria-label="Zoom simplification out">−</button><output id="simplify-zoom-label">100%</output><button id="simplify-zoom-in" class="small-button" aria-label="Zoom simplification in">+</button><button id="simplify-fit" class="small-button">Fit</button></div>
           </div>
@@ -33,8 +33,8 @@ export function createSimplifyEditor({ state, commit, apply, download }) {
             ['tolerance', 'Reduce nodes', 2, 0.01, 'Maximum outline deviation for node reduction. Higher values make a simpler, more angular outline.'],
           ].map(([key, label, max, step, hint]) => `<div class="control"><div class="control-label"><label for="simplify-${key}">${label}</label><div class="number-unit"><input type="number" id="simplify-${key}" min="0" max="${max}" step="${step}" value="0" aria-describedby="simplify-${key}-hint"><span>mm</span></div></div><input type="range" id="simplify-${key}-range" aria-label="${label} slider" aria-describedby="simplify-${key}-hint" min="0" max="${max}" step="${step}" value="0"><p class="control-hint" id="simplify-${key}-hint">${hint}</p></div>`).join('')}
           <button id="simplify-reset" class="small-button">Reset adjustments</button>
-          <p class="simplify-scope">Uses all artwork, including hidden outlines. Nested closed outlines become holes; overlapping outlines may change. Open paths only use node reduction.</p>
-          <p class="simplify-replace-note">Download SVG saves the simplified artwork at the current artwork size. Apply replaces the SVG and resets outline, tab, and region edits. Stencil settings stay in place. Undo restores the previous artwork and edits.</p>
+          <p class="simplify-scope">Uses all artwork, including hidden layers. Nested closed layers become holes; overlapping layers may change. Open paths only use node reduction.</p>
+          <p class="simplify-replace-note">Download SVG saves the simplified artwork at the current artwork size. Apply replaces the SVG and resets layer, tab, and region edits. Stencil settings stay in place. Undo restores the previous artwork and edits.</p>
         </div>
       </div>
       <div class="simplify-footer"><p id="simplify-status" role="status" aria-live="polite"></p><div><button id="cancel-simplify" class="small-button">Cancel</button><button id="download-simplify" class="small-button" disabled>Download SVG</button><button id="apply-simplify" class="download-button" disabled>Apply simplification</button></div></div>
@@ -76,7 +76,7 @@ export function createSimplifyEditor({ state, commit, apply, download }) {
     }
     const before = nodeCount(original.contours), after = nodeCount(art.contours);
     const percent = before ? Math.round((1 - after / before) * 100) : 0;
-    $('#simplify-statistics').textContent = `Nodes: ${before.toLocaleString()} → ${after.toLocaleString()} (${Math.abs(percent)}% ${percent >= 0 ? 'fewer' : 'more'}) · Outlines: ${original.contours.length} → ${art.contours.length}`;
+    $('#simplify-statistics').textContent = `Nodes: ${before.toLocaleString()} → ${after.toLocaleString()} (${Math.abs(percent)}% ${percent >= 0 ? 'fewer' : 'more'}) · Layers: ${original.contours.length} → ${art.contours.length}`;
   }
   function requestPreview() {
     clearTimeout(timer); worker?.terminate(); worker = null;

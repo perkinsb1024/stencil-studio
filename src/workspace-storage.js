@@ -6,11 +6,22 @@ const isContour = value => typeof value === 'string' && /^outline-\d+$/.test(val
 const isContourList = value => Array.isArray(value) && value.length <= 500 && value.every(isContour) && new Set(value).size === value.length;
 const isTab = value => typeof value === 'string' && /^(auto-\d+|tab-[a-zA-Z0-9-]+)$/.test(value);
 const isRegion = value => typeof value === 'string' && /^region-[a-zA-Z0-9-]+$/.test(value);
+const isShape = value => typeof value === 'string' && /^shape-\d+$/.test(value);
+const isBridge = value => typeof value === 'string' && /^bridge-[a-zA-Z0-9-]+$/.test(value);
+const validPoint = p => isObject(p) && ['x', 'y'].every(key => Number.isFinite(p[key]) && Math.abs(p[key]) <= 1000);
+const validMaterial = value =>
+  (value.materialVersion === undefined || value.materialVersion === 1) &&
+  (value.materialTreatments === undefined || isObject(value.materialTreatments) && Object.keys(value.materialTreatments).length <= 500 && Object.entries(value.materialTreatments).every(([key, mode]) => isShape(key) && ['outline', 'keep', 'cut'].includes(mode))) &&
+  (value.materialOrder === undefined || Array.isArray(value.materialOrder) && value.materialOrder.length <= 500 && value.materialOrder.every(isShape) && new Set(value.materialOrder).size === value.materialOrder.length) &&
+  (value.regionBridges === undefined || Array.isArray(value.regionBridges) && value.regionBridges.length <= 100 && new Set(value.regionBridges.map(b => b?.id)).size === value.regionBridges.length && value.regionBridges.every(b => isObject(b) && isBridge(b.id) && validPoint(b.a) && validPoint(b.b) && (b.control === undefined || validPoint(b.control)) && Number.isFinite(b.width) && b.width >= 0.5 && b.width <= 15 && typeof b.automatic === 'boolean' && (b.key === undefined || typeof b.key === 'string' && b.key.length <= 120))) &&
+  (value.bridgeExclusions === undefined || Array.isArray(value.bridgeExclusions) && value.bridgeExclusions.length <= 1000 && value.bridgeExclusions.every(key => typeof key === 'string' && key.length <= 120)) &&
+  ['bridgeWidth', 'minimumMaterialWidth'].every(key => value[key] === undefined || Number.isFinite(value[key]) && value[key] >= (key === 'bridgeWidth' ? 0.5 : 0.1) && value[key] <= 15) &&
+  ['bridgeReinforcement', 'bridgeMatchFeatures'].every(key => value[key] === undefined || typeof value[key] === 'boolean');
 const validRegions = value => Array.isArray(value) && value.length <= 100 && new Set(value.map(r => r?.id)).size === value.length && value.every(r =>
   isObject(r) && isRegion(r.id) && (r.contourId === null || isContour(r.contourId)) && Number.isFinite(r.width) && r.width >= 0.2 && r.width <= 12 && (r.taperLength === undefined || Number.isFinite(r.taperLength) && r.taperLength >= 0.1 && r.taperLength <= 50) && validPolygon(r.points));
 const ranges = { artworkWidth: [10, 1000], channelWidth: [0.2, 12], tabWidth: [0.5, 15], tabCount: [1, 24], tabOffset: [0, 100], margin: [0, 100] };
 function validSnapshot(value) {
-  return isObject(value) && (value.source === undefined || typeof value.source === 'string' && value.source.length <= 3_000_000 && typeof value.name === 'string' && (value.example === undefined || typeof value.example === 'string')) && (value.regions === undefined || validRegions(value.regions)) && ['hiddenContours', 'cutawayContours'].every(key => value[key] === undefined || isContourList(value[key])) && isObject(value.settings) && Object.entries(ranges).every(([key, [min, max]]) =>
+  return isObject(value) && validMaterial(value) && (value.source === undefined || typeof value.source === 'string' && value.source.length <= 3_000_000 && typeof value.name === 'string' && (value.example === undefined || typeof value.example === 'string')) && (value.regions === undefined || validRegions(value.regions)) && ['hiddenContours', 'cutawayContours'].every(key => value[key] === undefined || isContourList(value[key])) && isObject(value.settings) && Object.entries(ranges).every(([key, [min, max]]) =>
     Number.isFinite(value.settings[key]) && value.settings[key] >= min && value.settings[key] <= max) &&
     (value.settings.roundedTabs === undefined || typeof value.settings.roundedTabs === 'boolean') &&
     (value.settings.roundedChannelCorners === undefined || typeof value.settings.roundedChannelCorners === 'boolean') &&
@@ -27,8 +38,10 @@ export function readWorkspace(storage, key = workspaceKey) {
     if (['panX', 'panY'].some(key => ui[key] !== undefined && (!Number.isFinite(ui[key]) || Math.abs(ui[key]) > 1_000_000))) return null;
     // These optional fields preserve compatibility with workspaces and history
     // saved before outline visibility was editable.
-    if (['editingOutlines', 'showHiddenOutlines', 'editingRegions', 'drawingRegion'].some(key => ui[key] !== undefined && typeof ui[key] !== 'boolean') ||
-      ui.selectedOutlines !== undefined && !isContourList(ui.selectedOutlines) || ['editing', 'editingOutlines', 'editingRegions'].filter(key => ui[key]).length > 1) return null;
+    if (['editingOutlines', 'showHiddenOutlines', 'editingRegions', 'drawingRegion', 'editingBridges'].some(key => ui[key] !== undefined && typeof ui[key] !== 'boolean') ||
+      ui.selectedRegionBridges !== undefined && (!Array.isArray(ui.selectedRegionBridges) || ui.selectedRegionBridges.length > 100 || !ui.selectedRegionBridges.every(isBridge) || new Set(ui.selectedRegionBridges).size !== ui.selectedRegionBridges.length) ||
+      ui.selectedRegionBridge !== undefined && ui.selectedRegionBridge !== null && !isBridge(ui.selectedRegionBridge) ||
+      ui.selectedOutlines !== undefined && !isContourList(ui.selectedOutlines) || ['editing', 'editingOutlines', 'editingRegions', 'editingBridges'].filter(key => ui[key]).length > 1) return null;
     if (ui.selectedRegion !== undefined && ui.selectedRegion !== null && !isRegion(ui.selectedRegion) ||
       ui.regionScope !== undefined && ui.regionScope !== 'all' && !isContour(ui.regionScope) ||
       ui.regionTaperLength !== undefined && (!Number.isFinite(ui.regionTaperLength) || ui.regionTaperLength < 0.1 || ui.regionTaperLength > 50) ||

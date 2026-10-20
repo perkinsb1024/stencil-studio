@@ -1,0 +1,214 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Keep / Cut Away and bridges checks</title>
+<style>body{font:15px system-ui;padding:24px;color:#502c6c}li{margin:10px 0}.fail{color:#b22}iframe{width:1200px;height:1000px;border:1px solid #ddd}</style>
+<h1>Keep / Cut Away and bridge checks</h1><p id="summary">Running…</p><ol id="results"></ol><iframe id="editor" title="Stencil editor"></iframe>
+<script src="/vendor/paper-full.min.js"></script><script src="/vendor/clipper.js"></script><script type="module">
+const frame = document.querySelector('#editor'), key = 'stencil-studio.workspace.v1:material-editing-tests';
+localStorage.removeItem(key);
+let w, d, initialBridgeWidth;
+const $ = selector => d.querySelector(selector);
+const assert = (value, message = 'Unexpected result') => { if (!value) throw new Error(message); };
+const tick = () => new Promise(resolve => new URLSearchParams(location.search).has('headless') ? setTimeout(resolve, 50) : requestAnimationFrame(() => requestAnimationFrame(resolve)));
+const click = async selector => { $(selector).click(); await tick(); };
+const change = async (selector, value) => { $(selector).value = value; $(selector).dispatchEvent(new w.Event('change', { bubbles: true })); await tick(); };
+function flush() { w.dispatchEvent(new w.Event('stencil:before-reload')); return JSON.parse(localStorage.getItem(key)); }
+async function check(name, action) {
+  const li = document.createElement('li');
+  try { await action(); li.textContent = `PASS — ${name}`; }
+  catch (error) { li.className = 'fail'; li.textContent = `FAIL — ${name}: ${error.message}`; }
+  document.querySelector('#results').append(li);
+}
+async function load(url) {
+  await new Promise(resolve => { frame.onload = resolve; frame.src = url; });
+  w = frame.contentWindow; d = w.document;
+  if (new URLSearchParams(location.search).has('headless')) {
+    w.requestAnimationFrame = callback => w.setTimeout(() => callback(w.performance.now()), 16);
+    w.cancelAnimationFrame = id => w.clearTimeout(id);
+  }
+  await tick();
+}
+await load('/?workspace=material-editing-tests&live-reload=off');
+await check('Football regions preserve compound topology and expose editable treatments', async () => {
+  await click('[data-example="football"]'); await click('#edit-outlines');
+  assert($('#treatment-outline-0').value === 'cut');
+  assert($('#treatment-outline-1').value === 'keep');
+  assert(d.querySelectorAll('[data-treatment-outline]').length === 4, 'Expected one shared treatment per layer');
+  assert($('#notice').textContent.includes('1 unsupported'), $('#notice').textContent);
+  assert($('#material-status').hidden, 'Support status should not repeat the warning');
+  const { importSvg, examples } = await import('/src/import-svg.js');
+  const art = importSvg(examples.football.svg);
+  assert(art.sourceRegions.length === 4, 'Laces did not stay in one compound region');
+  assert(art.sourceRegions[3].contourIds.length === 5);
+});
+await check('Compound treatments update together and undo restores the previous treatment', async () => {
+  await change('#treatment-outline-3', 'cut');
+  assert($('#treatment-outline-3').value === 'cut');
+  assert(d.querySelectorAll('.compound-layer .contour-child').length === 5);
+  await click('#undo');
+  assert($('#treatment-outline-3').value === 'keep');
+});
+await check('Layer ordering changes actual cut geometry and can be undone', async () => {
+  const before = $('.cut-shape').getAttribute('d');
+  await click('[data-material-move="shape-0"][data-direction="1"]');
+  assert($('.cut-shape').getAttribute('d') !== before);
+  await click('#undo'); assert($('.cut-shape').getAttribute('d') === before);
+});
+await check('Automatic bridges support the central laces and preserve the band connections', async () => {
+  await click('#edit-bridges');
+  assert(!$('#bridge-inspector').hidden && $('#outline-inspector').hidden);
+  await click('#generate-bridges');
+  assert($('#material-status').textContent.includes('All retained material'), $('#material-status').textContent);
+  assert(flush().document.regionBridges.length === 1);
+  initialBridgeWidth = flush().document.regionBridges[0].width;
+  assert(initialBridgeWidth > 3, 'Expected the bridge to match the lace spine width');
+  assert(d.querySelectorAll('.region-bridge').length === 1);
+});
+await check('Width edits become custom, regeneration preserves them, and undo/redo works', async () => {
+  const id = flush().document.regionBridges[0].id;
+  await change('#bridge-picker', id); await change('#selected-bridge-width', '4.2');
+  const custom = flush().document.regionBridges[0];
+  assert(custom.width === 4.2 && !custom.automatic);
+  await click('#generate-bridges'); assert(JSON.stringify(flush().document.regionBridges[0]) === JSON.stringify(custom));
+  await click('#undo'); assert(flush().document.regionBridges[0].width === initialBridgeWidth);
+  await click('#redo'); assert(flush().document.regionBridges[0].width === 4.2);
+});
+await check('Session export includes regions and bridges; stencil export contains only final cuts', async () => {
+  const blobs = [], originalURL = w.URL.createObjectURL, originalClick = w.HTMLAnchorElement.prototype.click;
+  w.URL.createObjectURL = blob => { blobs.push(blob); return 'blob:test'; };
+  w.HTMLAnchorElement.prototype.click = () => {};
+  try {
+    await click('#download'); const svg = await blobs.pop().text();
+    assert(svg.includes('fill-rule="evenodd"') && !svg.includes('data-material-bridge') && !svg.includes('bridge-highlight'));
+    await click('#export-session'); const session = JSON.parse(await blobs.pop().text());
+    assert(session.document.materialVersion === 1 && session.document.regionBridges[0].width === 4.2);
+  } finally { w.URL.createObjectURL = originalURL; w.HTMLAnchorElement.prototype.click = originalClick; }
+});
+await check('Reload recovers the bridge editor, region settings, custom bridge and undo history', async () => {
+  flush(); await load('/?workspace=material-editing-tests&live-reload=off');
+  assert(!$('#bridge-inspector').hidden);
+  assert(flush().document.regionBridges[0].width === 4.2);
+  await click('#undo'); assert(flush().document.regionBridges[0].width === initialBridgeWidth);
+  await click('#redo'); assert(flush().document.regionBridges[0].width === 4.2);
+});
+await check('Manual anchors create a bridge and endpoint dragging is one reversible edit', async () => {
+  await change('#bridge-picker', flush().document.regionBridges[0].id); await click('#remove-bridge');
+  // Anchor from a lace interior to the surrounding sheet, derived from known
+  // source geometry and transformed using the same physical artwork frame.
+  const { importSvg, scaleArtwork, examples } = await import('/src/import-svg.js');
+  const art = importSvg(examples.football.svg), scaled = scaleArtwork(art, 150, 8);
+  const raw = { x: 110, y: 80 };
+  const p = { x: (raw.x - art.bounds.minX) * 150 / (art.bounds.maxX - art.bounds.minX) + 8, y: (raw.y - art.bounds.minY) * 150 / (art.bounds.maxX - art.bounds.minX) + 8 };
+  const q = { x: scaled.width / 2, y: 3 };
+  function pointer(type, point, target = $('#preview-svg')) {
+    const screen = new w.DOMPoint(point.x, point.y).matrixTransform($('#preview-svg').getScreenCTM());
+    target.dispatchEvent(new w.PointerEvent(type, { bubbles: true, button: 0, pointerId: 7, clientX: screen.x, clientY: screen.y }));
+  }
+  await click('#add-bridge'); pointer('pointerdown', p); await tick(); pointer('pointerdown', q); await tick();
+  assert(flush().document.regionBridges.length === 1);
+  assert($('#material-status').textContent.includes('All retained material'), $('#material-status').textContent);
+  const before = structuredClone(flush().document.regionBridges[0]);
+  const endpoint = d.querySelector('[data-bridge-end="b"]');
+  pointer('pointerdown', q, endpoint); pointer('pointermove', { x: q.x + 3, y: q.y }); pointer('pointerup', { x: q.x + 3, y: q.y }); await tick();
+  assert(flush().document.regionBridges[0].b.x !== before.b.x);
+  await click('#undo'); assert(JSON.stringify(flush().document.regionBridges[0]) === JSON.stringify(before));
+});
+await check('Resizing retains relative bridge positions and millimeter widths', async () => {
+  const before = structuredClone(flush().document.regionBridges);
+  await change('#artworkWidth', '200'); assert(JSON.stringify(flush().document.regionBridges) === JSON.stringify(before));
+});
+await check('Curved bridges have an editable bend handle and recover their geometry after reload', async () => {
+  await change('#bridge-picker', flush().document.regionBridges[0].id);
+  await click('#selected-bridge-curved');
+  assert(flush().document.regionBridges[0].control);
+  const handle = d.querySelector('[data-bridge-end="control"]');
+  assert(handle, 'Missing bend handle');
+  const before = flush().document.regionBridges[0].control.x;
+  handle.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+  assert(flush().document.regionBridges[0].control.x > before);
+  const bridge = structuredClone(flush().document.regionBridges[0]);
+  await load('/?workspace=material-editing-tests&live-reload=off');
+  assert(JSON.stringify(flush().document.regionBridges[0]) === JSON.stringify(bridge));
+  assert($('#selected-bridge-curved').checked && d.querySelector('[data-bridge-end="control"]'));
+});
+function bridgePointer(type, point, target = $('#preview-svg'), shiftKey = false) {
+  const screen = new w.DOMPoint(point.x, point.y).matrixTransform($('#preview-svg').getScreenCTM());
+  target.dispatchEvent(new w.PointerEvent(type, { bubbles: true, cancelable: true, button: 0, pointerId: 19, clientX: screen.x, clientY: screen.y, shiftKey }));
+}
+function boxBridges(a, b, shiftKey = false, finish = 'pointerup') {
+  bridgePointer('pointerdown', a, $('#preview-svg'), shiftKey);
+  bridgePointer('pointermove', b);
+  bridgePointer(finish, b);
+}
+await check('Rectangle selection highlights multiple bridges without changing geometry or history', async () => {
+  await change('#bridge-width', '4');
+  await click('#add-bridge');
+  bridgePointer('pointerdown', { x: 20, y: 3 });
+  bridgePointer('pointerdown', { x: 40, y: 3 }); await tick();
+  assert(flush().document.regionBridges.length === 2);
+  const before = flush();
+  boxBridges({ x: 220, y: 200 }, { x: 0, y: 0 }); await tick();
+  assert(d.querySelectorAll('.region-bridge.selected').length === 2);
+  assert(!$('#bridge-selection-box'));
+  const after = flush();
+  assert(after.ui.selectedRegionBridges.length === 2);
+  assert(JSON.stringify(after.document) === JSON.stringify(before.document));
+  assert(JSON.stringify(after.history) === JSON.stringify(before.history));
+  assert($('#selected-bridge-width').placeholder === 'Mixed');
+});
+await check('Shift extends selection; cancelled and empty rectangles behave consistently', async () => {
+  const first = flush().document.regionBridges[0].id;
+  await change('#bridge-picker', first);
+  boxBridges({ x: 19, y: 1 }, { x: 41, y: 5 }, true); await tick();
+  assert(flush().ui.selectedRegionBridges.length === 2, 'Shift did not add the second bridge');
+  boxBridges({ x: 1, y: 180 }, { x: 5, y: 190 }, false, 'pointercancel'); await tick();
+  assert(flush().ui.selectedRegionBridges.length === 2, 'Cancellation did not restore selection');
+  bridgePointer('pointerdown', { x: 1, y: 180 });
+  bridgePointer('pointermove', { x: 5, y: 190 });
+  $('#preview-svg').dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); await tick();
+  assert(flush().ui.selectedRegionBridges.length === 2 && !$('#bridge-selection-box'));
+  boxBridges({ x: 1, y: 180 }, { x: 5, y: 190 }); await tick();
+  assert(!flush().ui.selectedRegionBridges.length && $('#remove-bridge').disabled);
+  boxBridges({ x: 0, y: 0 }, { x: 220, y: 200 }); await tick();
+});
+await check('Bulk width and curvature edits affect all selected bridges and undo in one step', async () => {
+  const before = flush().document.regionBridges;
+  await change('#selected-bridge-width', '5.1');
+  assert(flush().document.regionBridges.every(b => b.width === 5.1 && !b.automatic));
+  await click('#undo');
+  assert(JSON.stringify(flush().document.regionBridges) === JSON.stringify(before));
+  await click('#redo');
+  boxBridges({ x: 0, y: 0 }, { x: 220, y: 200 }); await tick();
+  assert($('#selected-bridge-curved').indeterminate);
+  await click('#selected-bridge-curved');
+  assert(flush().document.regionBridges.every(b => b.control));
+});
+await check('Reload preserves multiple selection and Delete removes the group in one undo step', async () => {
+  const before = flush().document.regionBridges;
+  await load('/?workspace=material-editing-tests&live-reload=off');
+  assert(d.querySelectorAll('.region-bridge.selected').length === 2);
+  assert(flush().ui.selectedRegionBridges.length === 2);
+  $('#preview-svg').dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true })); await tick();
+  assert(!flush().document.regionBridges.length);
+  await click('#undo');
+  assert(JSON.stringify(flush().document.regionBridges) === JSON.stringify(before));
+});
+await check('Bridge panel and treatment controls fit a narrow preview', async () => {
+  frame.style.width = '375px'; await tick();
+  assert(d.documentElement.scrollWidth <= d.documentElement.clientWidth + 1, 'Page overflows at 375px');
+  await click('#edit-outlines');
+  for (const row of d.querySelectorAll('.outline-row')) {
+    const bounds = row.getBoundingClientRect();
+    for (const control of row.querySelectorAll('select,button,label')) {
+      const b = control.getBoundingClientRect(); assert(b.left >= bounds.left - 1 && b.right <= bounds.right + 1, 'Outline control overflows');
+    }
+  }
+  frame.style.width = '1200px';
+});
+await check('New artwork clears treatments and bridges while original Outline tabs remain available', async () => {
+  await click('[data-example="bloom"]');
+  const saved = flush(); assert(!saved.document.regionBridges.length && !Object.keys(saved.document.materialTreatments).length);
+  await click('#edit-tabs'); assert(!$('#tab-inspector').hidden && $('#bridge-inspector').hidden);
+  assert(d.querySelectorAll('.tab-marker').length === 8);
+});
+document.querySelector('#summary').textContent = `${document.querySelectorAll('#results li:not(.fail)').length} passed, ${document.querySelectorAll('#results .fail').length} failed`;
+document.title = document.querySelector('.fail') ? 'FAIL — Material checks' : 'PASS — Material checks';
+</script>

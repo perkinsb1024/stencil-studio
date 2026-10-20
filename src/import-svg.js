@@ -14,7 +14,7 @@ export function importSvg(source) {
     if (!doc.querySelector('path, rect, circle, ellipse, line, polyline, polygon, use')) throw new Error('This SVG contains live text. Convert text to paths in your drawing app, then upload it again.');
     warnings.push('Live text was skipped. Convert text to paths first if you want to cut the lettering.');
   }
-  if (doc.querySelector('image')) warnings.push('Embedded images were skipped. Only vector outlines can become cut paths.');
+  if (doc.querySelector('image')) warnings.push('Embedded images were skipped. Only vector layers can become cut paths.');
   if (doc.querySelector('clipPath, mask')) throw new Error('This SVG uses clipping or masks. Flatten these to paths in your drawing app before importing.');
   for (const el of [...doc.querySelectorAll('*')]) {
     if (!allowed.has(el.localName)) { el.remove(); continue; }
@@ -35,10 +35,16 @@ export function importSvg(source) {
   let root;
   try { root = paper.project.importSVG(doc.documentElement, { expandShapes: true, insert: false, applyMatrix: true }); }
   catch { throw new Error('This SVG could not be read. Try exporting a plain SVG with shapes converted to paths.'); }
-  const contours = [];
-  function collect(item, inheritedVisible = true) {
+  const contours = [], sourceRegions = [];
+  function collect(item, inheritedVisible = true, region = null) {
     const visible = inheritedVisible && item.visible && item.opacity > 0;
     if (!visible) return;
+    if (item instanceof paper.Path || item instanceof paper.CompoundPath) {
+      if (!region) {
+        region = { id: `shape-${sourceRegions.length}`, name: item.name || `Shape ${sourceRegions.length + 1}`, fillRule: item.fillRule || 'nonzero', contourIds: [] };
+        sourceRegions.push(region);
+      }
+    }
     if (item instanceof paper.Path) {
       if (item.segments.length < 2) return;
       const clone = item.clone({ insert: false });
@@ -49,14 +55,16 @@ export function importSvg(source) {
       clone.flatten(span / 5000);
       if (clone.segments.length > 30000) throw new Error('This artwork has too much detail. Simplify its paths before importing.');
       const points = clone.segments.map(s => ({ x: s.point.x, y: s.point.y }));
-      contours.push({ id: `outline-${contours.length}`, points, closed: item.closed });
+      const id = `outline-${contours.length}`;
+      contours.push({ id, points, closed: item.closed, regionId: region.id, fillRule: region.fillRule });
+      region.contourIds.push(id);
       clone.remove();
-    } else if (item.children) for (const child of item.children) collect(child, visible);
+    } else if (item.children) for (const child of item.children) collect(child, visible, item instanceof paper.CompoundPath ? region : null);
     else if (item instanceof paper.SymbolItem) { const expanded = item.definition.item.clone({ insert: false }); expanded.transform(item.globalMatrix); collect(expanded); expanded.remove(); }
   }
   collect(root);
   root.remove();
-  if (!contours.length) throw new Error('No vector outlines found. Upload an SVG containing paths or shapes.');
+  if (!contours.length) throw new Error('No vector layers found. Upload an SVG containing paths or shapes.');
   if (contours.length > 500) throw new Error('This SVG has more than 500 contours. Simplify it or split it into smaller files.');
   const all = contours.flatMap(c => c.points);
   let bounds = all.reduce((b, p) => ({ minX: Math.min(b.minX, p.x), minY: Math.min(b.minY, p.y), maxX: Math.max(b.maxX, p.x), maxY: Math.max(b.maxY, p.y) }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
@@ -69,14 +77,14 @@ export function importSvg(source) {
   }
   if (bounds.maxX - bounds.minX < 0.0001) throw new Error('The artwork needs a nonzero width. Rotate vertical lines or include a wider shape.');
   if (contours.some(c => !c.closed)) warnings.push('Open paths are included as channels with square ends.');
-  return { contours, bounds, warnings, description };
+  return { contours, sourceRegions: sourceRegions.filter(r => r.contourIds.length), bounds, warnings, description };
 }
 
 export function scaleArtwork(artwork, width, padding) {
   const { bounds } = artwork;
   const scale = width / (bounds.maxX - bounds.minX);
   return {
-    contours: artwork.contours.map(c => ({ ...measureContour(c.points.map(p => ({ x: (p.x - bounds.minX) * scale + padding, y: (p.y - bounds.minY) * scale + padding })), c.closed), id: c.id })),
+    contours: artwork.contours.map(c => ({ ...measureContour(c.points.map(p => ({ x: (p.x - bounds.minX) * scale + padding, y: (p.y - bounds.minY) * scale + padding })), c.closed), id: c.id, regionId: c.regionId, fillRule: c.fillRule })),
     width: width + 2 * padding,
     height: (bounds.maxY - bounds.minY) * scale + 2 * padding,
     artworkHeight: (bounds.maxY - bounds.minY) * scale,
@@ -98,6 +106,7 @@ export function flowerSvg() {
 }
 
 export const examples = {
+  football: { name: 'Football.svg', treatments: { 'shape-0': 'cut', 'shape-1': 'keep', 'shape-2': 'keep', 'shape-3': 'keep' }, svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 160"><g transform="rotate(-25 110 80)"><path id="football" fill="#89654c" d="M17 74C36 45 71 25 110 25C149 25 184 45 203 74Q207 80 203 86C184 115 149 135 110 135C71 135 36 115 17 86Q13 80 17 74Z"/><path id="left-band" fill="white" d="M46 35H61Q49 80 61 125H46Q34 80 46 35Z"/><path id="right-band" fill="white" d="M159 35H174Q186 80 174 125H159Q171 80 159 35Z"/><path id="laces" fill="white" d="M75 77H145V83H75Z M80 65H86V95H80Z M97 65H103V95H97Z M114 65H120V95H114Z M131 65H137V95H131Z"/></g></svg>' },
   bloom: { name: 'Bloom.svg', svg: flowerSvg() },
   orbit: { name: 'Orbit.svg', svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 220"><circle cx="110" cy="110" r="90"/><circle cx="110" cy="110" r="62"/><circle cx="110" cy="110" r="33"/></svg>' },
   arch: { name: 'Arch.svg', svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 240"><path d="M20 220V100A80 80 0 0 1 180 100V220Z"/><path d="M52 190V102A48 48 0 0 1 148 102V190Z"/></svg>' },

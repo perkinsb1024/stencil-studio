@@ -7,6 +7,24 @@ const workspace = {
   ui: { view: 'cut', zoom: 1.25, showTabs: true, showOriginal: true, editing: true, adding: false, selectCurrentOutlineOnly: false, selectedContour: 'outline-0', selectedTab: 'auto-0', selectedTabs: [{ contourId: 'outline-0', id: 'auto-0' }] },
   history: { past: [document, document, document], future: [document] },
 };
+test('material regions, bridges, exclusions and bridge editor recover alongside legacy history', () => {
+  const store = storage();
+  const material = { ...document, materialVersion: 1, materialTreatments: { 'shape-0': 'cut', 'shape-1': 'keep' }, materialOrder: ['shape-1', 'shape-0'], regionBridges: [{ id: 'bridge-test', a: { x: 0.4, y: -0.05 }, b: { x: 0.5, y: 0.4 }, width: 3, automatic: false }], bridgeExclusions: ['0.4,0.1:0.5,0.2'], bridgeWidth: 3, minimumMaterialWidth: 0.5, bridgeReinforcement: true };
+  const saved = { ...workspace, document: material, ui: { ...workspace.ui, editing: false, editingBridges: true, selectedRegionBridge: 'bridge-test' }, history: { past: [document, material], future: [material] } };
+  writeWorkspace(store, saved);
+  assert.deepEqual(readWorkspace(store), saved);
+});
+test('invalid material treatments, bridge geometry and conflicting bridge modes are rejected', () => {
+  const store = storage();
+  for (const invalid of [{ materialTreatments: { 'shape-0': 'invalid' } }, { materialOrder: ['shape-0', 'shape-0'] }, { regionBridges: [{ id: 'bridge-test', a: { x: 0, y: 0 }, b: { x: 1, y: 1 }, width: -1, automatic: false }] }, { minimumMaterialWidth: 0 }, { materialVersion: 2 }]) {
+    store.setItem(workspaceKey, JSON.stringify({ ...workspace, document: { ...document, ...invalid } }));
+    assert.equal(readWorkspace(store), null);
+    store.setItem(workspaceKey, JSON.stringify({ ...workspace, history: { past: [{ ...document, ...invalid }], future: [] } }));
+    assert.equal(readWorkspace(store), null);
+  }
+  store.setItem(workspaceKey, JSON.stringify({ ...workspace, ui: { ...workspace.ui, editingBridges: true } }));
+  assert.equal(readWorkspace(store), null);
+});
 function storage() {
   const values = new Map();
   return { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };

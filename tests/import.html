@@ -18,6 +18,16 @@ check('Compound path subcontours remain separate', () => {
   const a = importSvg(wrap('<path d="M10 10H100V100H10Z M30 30H80V80H30Z"/>'));
   assert(a.contours.length === 2); assert(a.contours.every(c => c.closed));
 });
+check('Material regions retain inherited fill rules, drawing order and transformed compound membership', () => {
+  const a = importSvg(wrap('<g fill-rule="evenodd" transform="translate(5 10)"><path id="donut" d="M10 10H100V100H10Z M30 30H80V80H30Z"/></g><rect x="120" y="10" width="10" height="10"/>'));
+  assert(a.sourceRegions.length === 2);
+  assert(a.sourceRegions[0].fillRule === 'evenodd');
+  assert(a.sourceRegions[0].contourIds.length === 2);
+  assert(a.contours[0].regionId === a.contours[1].regionId);
+  assert(a.contours[2].regionId !== a.contours[0].regionId);
+  const scaled = scaleArtwork(a, 150, 8);
+  assert(scaled.contours[0].regionId === a.contours[0].regionId && scaled.contours[0].fillRule === 'evenodd');
+});
 check('Curves flatten and preserve a circular outline', () => {
   const a = importSvg(wrap('<circle cx="100" cy="100" r="40"/>'));
   assert(a.contours.length === 1 && a.contours[0].points.length > 40);
