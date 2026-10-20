@@ -393,6 +393,33 @@ test('tapered channels keep round corners and closed seams without filling the i
   assert.equal(insideCuts(result, { x: 113, y: 7 }), 0);
 });
 
+test('regional widths on sampled curves leave continuous boundaries without hairline slits', () => {
+  const points = Array.from({ length: 96 }, (_, i) => ({ x: 50 + 30 * Math.cos(i * Math.PI / 48), y: 50 + 30 * Math.sin(i * Math.PI / 48) }));
+  for (const vertices of [points, points.toReversed()]) {
+    const contour = { ...measureContour(vertices, true), id: 'outline-0' };
+    for (const [channelWidth, width] of [[8, 2], [2, 8]]) {
+      const result = generateStencil([contour], { ...noTabs, channelWidth, regions: [{ ...region(rect(45, 10, 90, 90), width), taperLength: 5 }] });
+      assert.equal(result.paths.length, 2, 'A closed channel must have only its outer boundary and inner hole');
+      assert.equal(insideCuts(result, { x: 50, y: 50 }), 0);
+      for (const p of result.paths.flat()) {
+        const nearest = Math.min(...contour.points.slice(1).map((b, i) => {
+          const a = contour.points[i], dx = b.x - a.x, dy = b.y - a.y;
+          const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy)));
+          return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
+        }));
+        assert.ok(nearest >= 0.98, `A crack reaches inside the minimum channel radius at ${p.x}, ${p.y}`);
+      }
+      assert.equal((exportSvg(result, 100, 100).match(/Z/g) || []).length, 2);
+    }
+    for (const roundedTabs of [false, true]) {
+      const result = generateStencil([contour], { ...options, roundedTabs, channelWidth: 8, regions: [{ ...region(rect(45, 10, 90, 90), 2), taperLength: 5 }] });
+      assert.equal(result.paths.length, 4, 'Each pair of tabs must bound one continuous cut');
+      for (const bridge of result.bridges) assert.equal(insideCuts(result, bridge.point), 0);
+      assert.deepEqual(result.warnings, []);
+    }
+  }
+});
+
 test('a tab in a taper retains square ends and its full gap, without round caps intruding', () => {
   const result = generateStencil([regionalLine], { ...noTabs, tabLayouts: { 'outline-0': [tab('taper-tab', 0.15, 6)] }, regions: [region(rect(30, 40, 70, 60), 1)] });
   assert.equal(result.bridges.length, 1);

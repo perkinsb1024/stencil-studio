@@ -115,7 +115,17 @@ export function channelPaths(points, closed, profile, caps = {}) {
       const angle = start + turn * i / count;
       return { x: point.x + Math.cos(angle) * radius, y: point.y + Math.sin(angle) * radius };
     });
-    add([point, ...arc]);
+    // Span both sides of the join so it overlaps the adjoining strips. A fan
+    // ending at the center only touches each strip along half an edge; rounding
+    // that center to Clipper's integer grid can open a slit all the way into
+    // the channel. Move the fan's anchor inside both strips, and use their
+    // exact offset endpoints for the arc.
+    const offset = (direction, sign) => ({ x: point.x - direction.y * radius * sign, y: point.y + direction.x * radius * sign });
+    arc[0] = offset(before, side);
+    arc[arc.length - 1] = offset(after, side);
+    const middle = start + turn / 2;
+    const anchor = { x: point.x - Math.cos(middle) * radius / 2, y: point.y - Math.sin(middle) * radius / 2 };
+    add([anchor, ...arc]);
   }
   for (let i = 1; i < sampled.length - 1; i++) join(sampled[i], directions[i - 1], directions[i]);
   if (closed) join(sampled[0], directions.at(-1), directions[0]);
