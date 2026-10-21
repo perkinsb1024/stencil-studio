@@ -9,6 +9,16 @@ export function issueTool(message) {
   return /bridge|unsupported|connect|retained|sheet/i.test(message) ? 'bridges' : /tab/i.test(message) ? 'tabs' : /channel|region|width/i.test(message) ? 'regions' : 'layers';
 }
 
+export function updatePanHint(state, mode = $('#pan-preview').getAttribute('aria-pressed') === 'true') {
+  let hint = 'Zoom in to pan the canvas.';
+  if (state.zoom > 1) {
+    if (state.workflowStep !== 2) hint = 'Drag to pan the zoomed canvas.';
+    else if (mode) hint = 'Pan is on. Drag to move the canvas. Turn Pan off to edit.';
+    else hint = 'Drag to select or edit. Hold Space and drag to pan.';
+  }
+  $('#move-view-hint').textContent = hint;
+}
+
 export function updateWorkspaceUI(state) {
   const step = state.workflowStep;
   $('.workspace').dataset.workflowStep = step;
@@ -19,20 +29,24 @@ export function updateWorkspaceUI(state) {
   }
   for (const [id, number] of [['artwork-step', 1], ['shape-step', 2], ['export-step', 3]]) $(`#${id}`).hidden = step !== number;
   $('#shape-header').hidden = step !== 2;
-  const channelHost = state.activeTool === 'layers' ? $('#layer-channel-settings') : $('#region-channel-settings');
-  if ($('#channel-settings').parentElement !== channelHost) channelHost.append($('#channel-settings'));
-  $('#layer-channel-settings').hidden = !state.artwork.contours.some(c => !state.hiddenContours.includes(c.id) && (state.materialTreatments[c.regionId] ?? 'outline') === 'outline');
+  $('.tab-edit-toolbar').hidden = step !== 2;
   $('#step-back').hidden = step === 1;
   $('#step-next').hidden = step === 3;
-  $('#step-next').textContent = step === 2 ? 'Continue to Review' : 'Continue';
+  const toolName = { layers: 'Layers', tabs: 'Tabs', bridges: 'Bridges', regions: 'Width Regions' }[state.activeTool];
+  $('#step-back').textContent = step === 3 ? `Back to ${toolName}` : 'Back to Artwork';
+  $('#step-next').textContent = step === 2 ? 'Continue to Review' : 'Continue to Layers';
+  $('#pan-preview').hidden = step !== 2;
+  $('#pan-preview').title = state.zoom > 1 ? 'Toggle between dragging to pan and editing artwork' : 'Zoom in to pan while editing';
+  updatePanHint(state);
+  $('#region-channel-summary').textContent = `Default channel width: ${state.channelWidth} mm`;
+  $('#toggle-controls').hidden = step !== 2;
   $('#toggle-controls').textContent = state.controlsCollapsed ? 'Show Controls' : 'Inspect Canvas';
   $('#toggle-controls').setAttribute('aria-expanded', !state.controlsCollapsed);
   $('#document-name').textContent = state.name;
   $('#document-name').title = state.name;
   $('#filename').title = state.name;
   $('#sample-badge').hidden = !state.example;
-  $('#upload').classList.toggle('compact-upload', state.sourceChosen);
-  $('#upload strong').textContent = state.sourceChosen ? 'Replace SVG' : 'Upload SVG';
+  $('#upload strong').textContent = state.sourceChosen ? 'Drop an SVG to replace artwork' : 'Drop your SVG here';
   $('#replace-note').hidden = !state.sourceChosen;
   const totalLayers = new Set(state.artwork.contours.map(c => c.regionId)).size;
   const visibleLayers = new Set(state.artwork.contours.filter(c => !state.hiddenContours.includes(c.id)).map(c => c.regionId)).size;

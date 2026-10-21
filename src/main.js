@@ -1,4 +1,4 @@
-import { updateWorkspaceUI } from './workspace-ui.js';
+import { updateWorkspaceUI, updatePanHint } from './workspace-ui.js';
 import { pendingTypeReviews, typeReviewIds, decideLayerType } from './type-review.js';
 import { workspaceView } from './workspace-view.js';
 import { createOrderedList, orderControls } from './ordered-list.js';
@@ -39,15 +39,19 @@ const htmlText = text => String(text).replace(/[&<>"']/g, char => ({ '&': '&amp;
 const materialDefaults = () => ({ ...suggestionDefaults(), areaDecisions: {}, areaSuggestionBasis: null, materialVersion: 1, materialTreatments: {}, materialOrder: [], regionBridges: [], bridgeExclusions: [], bridgeWidth: 3, minimumMaterialWidth: 0.5, bridgeReinforcement: false, bridgeMatchFeatures: true });
 Object.assign(state, { workflowStep: 1, activeTool: 'layers', showBridges: true, reviewingTypes: false, reviewRegion: null, layerQuery: '', layerFilter: 'all', controlsCollapsed: false, sourceChosen: false, areaDecisions: {} }, materialDefaults(), { editingBridges: false, selectedRegionBridge: null, selectedRegionBridges: [] });
 const outlineThumbnails = new WeakMap();
+const outlineBounds = new WeakMap();
 
 document.querySelector('#app').innerHTML = workspaceView(icon, bridgePanel);
-// The tool header does not scroll away when the object inspector is long.
+// Keep document sizing above the workspace and editing tools over the canvas.
 const inspectorHeader = document.createElement('div');
 inspectorHeader.id = 'shape-header';
 inspectorHeader.className = 'inspector-header';
 inspectorHeader.hidden = true;
-inspectorHeader.append($('.size-section'), $('.tab-edit-toolbar'), $('#toggle-controls'));
-$('.inspector').prepend(inspectorHeader);
+inspectorHeader.append($('.size-section'));
+$('.workspace').before(inspectorHeader);
+$('.preview-panel').prepend($('.tab-edit-toolbar'));
+$('.inspector-body').before($('#toggle-controls'));
+$('#tabs-available').prepend($('#channel-settings'));
 
 let noticeTimer;
 function notify(message, kind = 'success') {
@@ -196,11 +200,22 @@ function renderOutlineTargets() {
     </g>`;
   }).join('')}</g>`;
 }
-function selectOutline(id, additive = false) {
+function selectOutline(id, additive = false, reveal = false) {
   if (!id) { if (!additive) state.selectedOutlines = []; }
   else if (additive) state.selectedOutlines = state.selectedOutlines.includes(id) ? state.selectedOutlines.filter(value => value !== id) : [...state.selectedOutlines, id];
   else state.selectedOutlines = materialMode(state.artwork.contours.find(c => c.id === id), state) === 'outline' ? [id] : state.artwork.contours.filter(c => c.regionId === state.artwork.contours.find(c => c.id === id).regionId).map(c => c.id);
-  render();
+  updateOutlineSelection();
+  queueWorkspaceSave();
+  if (id && reveal) {
+    const regionId = state.artwork.contours.find(c => c.id === id)?.regionId;
+    const card = [...$('#outline-list').children].find(element => element.dataset.orderId === regionId);
+    if (card) {
+      const sidebar = $('.inspector-body');
+      const bounds = sidebar.getBoundingClientRect(), layer = card.getBoundingClientRect();
+      if (layer.top < bounds.top || layer.height > bounds.height) sidebar.scrollTop += layer.top - bounds.top;
+      else if (layer.bottom > bounds.bottom) sidebar.scrollTop += layer.bottom - bounds.bottom;
+    }
+  }
 }
 function setLayerTypes(ids, mode) {
   const regions = new Set(state.artwork.contours.filter(c => ids.includes(c.id)).map(c => c.regionId));
@@ -229,14 +244,58 @@ function setOutlineVisibility(ids, visible) {
 }
 function outlineThumbnail(contour) {
   if (outlineThumbnails.has(contour)) return outlineThumbnails.get(contour);
-  const xs = contour.points.map(p => p.x), ys = contour.points.map(p => p.y);
-  const x = Math.min(...xs), y = Math.min(...ys), width = Math.max(...xs) - x, height = Math.max(...ys) - y;
+  const contours = Array.isArray(contour) ? contour : [contour];
+  let x = Infinity, y = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const member of contours) for (const point of member.points) {
+    x = Math.min(x, point.x); y = Math.min(y, point.y);
+    maxX = Math.max(maxX, point.x); maxY = Math.max(maxY, point.y);
+  }
+  const width = maxX - x, height = maxY - y;
   const padding = Math.max(width, height, 1) * 0.1;
   // Keep the full contour: sampling by vertex index can skip whole corners
   // when curved sections have many more vertices than straight sections.
-  const thumbnail = `<svg viewBox="${x - padding} ${y - padding} ${width + padding * 2} ${height + padding * 2}" aria-hidden="true"><path d="${pathData(contour.points, contour.closed)}" fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>`;
+  const thumbnail = `<svg viewBox="${x - padding} ${y - padding} ${width + padding * 2} ${height + padding * 2}" aria-hidden="true">${contours.map(member => `<path d="${pathData(member.points, member.closed)}" fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke"/>`).join('')}</svg>`;
   outlineThumbnails.set(contour, thumbnail);
   return thumbnail;
+}
+function updateOutlineSelectionControls() {
+  const selected = new Set(state.selectedOutlines);
+  $('#hide-outlines').disabled = !state.selectedOutlines.some(id => !state.hiddenContours.includes(id));
+  $('#show-outlines').disabled = !state.selectedOutlines.some(id => state.hiddenContours.includes(id));
+  $('#keep-only-outlines').disabled = selected.size === 0;
+  $('#show-all-outlines').disabled = state.hiddenContours.length === 0;
+  $('#layer-selection-actions').hidden = !selected.size;
+  const selectedRegions = new Set(state.artwork.contours.filter(c => selected.has(c.id)).map(c => c.regionId));
+  $('#layer-selection-controls').hidden = selectedRegions.size < 2;
+  const selectedMembers = state.artwork.contours.filter(c => selectedRegions.has(c.regionId));
+  const selectedModes = new Set(selectedMembers.map(c => materialMode(c, state)));
+  $('#selected-layer-count').textContent = `${selectedRegions.size} ${selectedRegions.size === 1 ? 'Layer' : 'Layers'} Selected`;
+  $('#selected-layer-treatment').value = selectedModes.size === 1 ? [...selectedModes][0] : '';
+  for (const option of $('#selected-layer-treatment').options) if (option.value) option.disabled = option.value !== 'outline' && selectedMembers.some(c => !c.closed);
+}
+function updateOutlineSelectionHighlights() {
+  const selected = new Set(state.selectedOutlines);
+  const regions = new Set(state.artwork.contours.filter(c => selected.has(c.id)).map(c => c.regionId));
+  const highlight = (element, active) => {
+    if (element.classList.contains('selected') !== active) element.classList.toggle('selected', active);
+  };
+  const pressed = (element, active) => {
+    if (element.getAttribute('aria-pressed') !== String(active)) element.setAttribute('aria-pressed', active);
+  };
+  for (const target of document.querySelectorAll('[data-visibility-outline]')) {
+    const active = selected.has(target.dataset.visibilityOutline);
+    highlight(target, active); pressed(target, active);
+  }
+  for (const card of $('#outline-list').querySelectorAll('.layer-card')) {
+    const active = regions.has(card.dataset.orderId);
+    highlight(card, active);
+    pressed(card.querySelector('.outline-select'), active);
+    for (const button of card.querySelectorAll('.compound-children [data-select-outline]')) pressed(button, selected.has(button.dataset.selectOutline));
+  }
+}
+function updateOutlineSelection() {
+  if (state.layerFilter === 'selected') updateOutlineEditor();
+  else { updateOutlineSelectionControls(); updateOutlineSelectionHighlights(); }
 }
 function updateOutlineEditor() {
   $('#edit-outlines').textContent = 'Layers';
@@ -246,24 +305,13 @@ function updateOutlineEditor() {
   const shown = groups.filter(id => state.artwork.contours.some(c => c.regionId === id && !state.hiddenContours.includes(c.id)));
   $('#outline-count').textContent = `${shown.length} of ${groups.length} Visible`;
   $('#show-hidden-outlines').checked = state.showHiddenOutlines;
-  const selected = state.selectedOutlines;
-  $('#hide-outlines').disabled = !selected.some(id => !state.hiddenContours.includes(id));
-  $('#show-outlines').disabled = !selected.some(id => state.hiddenContours.includes(id));
-  $('#keep-only-outlines').disabled = selected.length === 0;
-  $('#show-all-outlines').disabled = state.hiddenContours.length === 0;
-  $('#layer-selection-actions').hidden = !selected.length;
-  $('#layer-selection-controls').hidden = !selected.length;
-  const selectedRegions = new Set(state.artwork.contours.filter(c => selected.includes(c.id)).map(c => c.regionId));
-  const selectedMembers = state.artwork.contours.filter(c => selectedRegions.has(c.regionId));
-  const selectedModes = new Set(selectedMembers.map(c => materialMode(c, state)));
-  $('#selected-layer-count').textContent = `${selectedRegions.size} ${selectedRegions.size === 1 ? 'Layer' : 'Layers'} Selected`;
-  $('#selected-layer-treatment').value = selectedModes.size === 1 ? [...selectedModes][0] : '';
-  for (const option of $('#selected-layer-treatment').options) if (option.value) option.disabled = option.value !== 'outline' && selectedMembers.some(c => !c.closed);
   updateTypeReview();
+  updateOutlineSelectionControls();
+  const selected = state.selectedOutlines;
   const filtered = Boolean(state.layerQuery || state.layerFilter !== 'all');
   $('#layer-reorder-hint').hidden = !filtered;
   const list = $('#outline-list');
-  const key = JSON.stringify([state.hiddenContours, state.cutawayContours, state.materialTreatments, state.materialOrder, state.areaSuggestions, state.areaOverrides, state.areaDecisions, selected, state.layerQuery, state.layerFilter]);
+  const key = JSON.stringify([state.hiddenContours, state.cutawayContours, state.materialTreatments, state.materialOrder, state.areaSuggestions, state.areaOverrides, state.areaDecisions, state.layerFilter === 'selected' ? selected : null, state.layerQuery, state.layerFilter]);
   if (list.artwork !== state.artwork || list.visibilityKey !== key) {
     const focus = list.contains(document.activeElement) ? document.activeElement.id : null;
     const openGroups = new Set([...list.querySelectorAll('details.compound-children[open]')].map(el => el.dataset.group));
@@ -280,7 +328,7 @@ function updateOutlineEditor() {
       const controls = orderControls(`layer-${regionId}`, label, position, groups.length, filtered);
       const children = compound ? `<details class="compound-children" data-group="${regionId}" ${openGroups.has(regionId) ? 'open' : ''}><summary>${members.length} Contours</summary>${members.map((contour, index) => `<div class="contour-child"><button id="select-${contour.id}" data-select-outline="${contour.id}" aria-pressed="${selected.includes(contour.id)}">Contour ${index + 1}</button><label class="check-label"><input id="visible-${contour.id}" type="checkbox" data-visible-outline="${contour.id}" aria-label="Show ${label} Contour ${index + 1}" ${state.hiddenContours.includes(contour.id) ? '' : 'checked'} />Visible</label></div>`).join('')}</details>` : '';
       return `<section class="layer-card ${compound ? 'compound-layer' : ''} ${active ? 'selected' : ''} ${hidden ? 'is-hidden' : ''}" role="listitem" data-order-id="${regionId}" data-order-label="${label}">
-        <div class="layer-main">${controls}<button ${compound ? '' : `id="select-${c.id}"`} class="outline-select" data-select-outline="${c.id}" aria-label="Select ${label}" aria-pressed="${active}">${outlineThumbnail(c)}<span>${label}<small class="${pending ? 'needs-review' : ''}">${status}</small></span></button><label class="visibility-toggle" title="${hidden ? 'Show' : 'Hide'} ${label}"><input ${compound ? '' : `id="visible-${c.id}"`} type="checkbox" data-visible-layer="${regionId}" ${compound ? '' : `data-visible-outline="${c.id}"`} aria-label="${hidden ? 'Show' : 'Hide'} ${label}" ${hidden ? '' : 'checked'} /><span aria-hidden="true">${icon('eye')}</span></label></div>
+        <div class="layer-main">${controls}<button ${compound ? '' : `id="select-${c.id}"`} class="outline-select" data-select-outline="${c.id}" aria-label="Select ${label}" aria-pressed="${active}">${outlineThumbnail(compound ? members : c)}<span>${label}<small class="${pending ? 'needs-review' : ''}">${status}</small></span></button><label class="visibility-toggle" title="${hidden ? 'Show' : 'Hide'} ${label}"><input ${compound ? '' : `id="visible-${c.id}"`} type="checkbox" data-visible-layer="${regionId}" ${compound ? '' : `data-visible-outline="${c.id}"`} aria-label="${hidden ? 'Show' : 'Hide'} ${label}" ${hidden ? '' : 'checked'} /><span aria-hidden="true">${icon('eye')}</span></label></div>
         <label class="layer-treatment" for="treatment-${c.id}"><span>Layer Type</span><select id="treatment-${c.id}" data-treatment-outline="${c.id}" aria-label="${label} Type">${[['outline', 'Outline'], ['keep', 'Keep'], ['cut', 'Cut Away']].map(([value, text]) => `<option value="${value}" ${mode === value ? 'selected' : ''} ${value !== 'outline' && members.some(m => !m.closed) ? 'disabled' : ''}>${text}</option>`).join('')}</select></label>
         ${children}<details class="layer-explanation"><summary>Type Details</summary><div class="area-suggestion"><strong>${status}</strong>${suggestion ? `<span>Suggested Type: ${treatmentLabel(suggestion.mode)}</span><span>${htmlText(suggestion.reason)}</span><span>Confidence: ${suggestion.confidence}</span>` : '<span>Choose a layer type to control its treatment.</span>'}</div></details>
       </section>`;
@@ -288,6 +336,7 @@ function updateOutlineEditor() {
     list.artwork = state.artwork; list.visibilityKey = key; list.scrollTop = scroll;
     if (focus) document.getElementById(focus)?.focus({ preventScroll: true });
   }
+  updateOutlineSelectionHighlights();
 }
 
 function fitSheet() {
@@ -371,7 +420,8 @@ function updateTabEditor() {
   $('#edit-tabs').textContent = 'Tabs';
   $('#edit-tabs').setAttribute('aria-pressed', state.editing);
   $('#edit-tabs').setAttribute('aria-expanded', state.editing);
-  $('#edit-tabs').disabled = false;
+  $('#edit-tabs').disabled = !toolAvailable('tabs');
+  $('#edit-tabs').title = $('#edit-tabs').disabled ? 'Tabs require a visible Outline layer.' : '';
   $('#tabs-unavailable').hidden = contours.length > 0;
   $('#tabs-available').hidden = contours.length === 0;
   $('#add-tab').hidden = !state.editing;
@@ -478,33 +528,65 @@ const simplifyEditor = createSimplifyEditor({
 });
 $('#simplify-artwork').addEventListener('click', () => simplifyEditor.open());
 const toolModes = { layers: 'editingOutlines', tabs: 'editing', bridges: 'editingBridges', regions: 'editingRegions' };
+function toolAvailable(tool) {
+  const visible = state.artwork?.contours.filter(c => !state.hiddenContours.includes(c.id)) ?? [];
+  if (tool === 'tabs' || tool === 'regions') return visible.some(c => materialMode(c, state) === 'outline');
+  if (tool === 'bridges') return state.regionBridges.length > 0 || visible.some(c => {
+    const mode = materialMode(c, state);
+    return mode === 'outline' || mode === 'cut' && c.closed;
+  });
+  return true;
+}
 function syncEditingFlags() {
+  if (!toolAvailable(state.activeTool)) { state.activeTool = 'layers'; state.adding = false; }
+  $('#edit-regions').disabled = !toolAvailable('regions');
+  $('#edit-regions').title = $('#edit-regions').disabled ? 'Width Regions require a visible Outline layer.' : '';
+  $('#edit-bridges').disabled = !toolAvailable('bridges');
+  $('#edit-bridges').title = $('#edit-bridges').disabled ? 'Bridges require a visible Outline or Cut Away layer.' : '';
   for (const [tool, flag] of Object.entries(toolModes)) state[flag] = state.workflowStep === 2 && state.activeTool === tool;
 }
-function navigateStep(step) {
+function closeActionPanels() {
+  document.querySelectorAll('.action-popover:popover-open').forEach(panel => panel.hidePopover());
+}
+function navigateStep(step, resumeTool = false) {
   if (![1, 2, 3].includes(step)) return;
+  closeActionPanels();
   layerOrdering.cancel(); regionOrdering.cancel();
   commitWorkspaceEdits(); clearGhost();
   bridgeEditor.cancel(); state.adding = false;
+  if (step === 2 && !resumeTool) state.activeTool = 'layers';
+  previewPan.reset();
   state.workflowStep = step; state.controlsCollapsed = false;
-  syncEditingFlags(); render(); queueWorkspaceSave();
+  syncEditingFlags(); render(); resetInspectorScroll(); queueWorkspaceSave();
 }
 function activateTool(tool) {
-  if (!(tool in toolModes)) return;
+  if (!(tool in toolModes) || !toolAvailable(tool)) return;
   if (state.workflowStep === 2 && state.activeTool === tool) return;
+  closeActionPanels();
   layerOrdering.cancel(); regionOrdering.cancel();
   commitWorkspaceEdits(); clearGhost(); bridgeEditor.cancel();
   state.workflowStep = 2; state.activeTool = tool; state.controlsCollapsed = false; state.adding = false;
   if (tool === 'regions' && !state.selectedRegion && !state.drawingRegion) state.regionScope = state.selectedOutlines[0] ?? state.selectedContour ?? 'all';
-  syncEditingFlags(); render(); queueWorkspaceSave();
+  previewPan.reset();
+  syncEditingFlags(); render(); resetInspectorScroll(); queueWorkspaceSave();
+}
+function resetInspectorScroll() {
+  $('.inspector-body').scrollTop = 0;
 }
 function announce(message) { $('#announcements').textContent = message; }
 for (const [tool, id] of Object.entries({ layers: 'edit-outlines', tabs: 'edit-tabs', bridges: 'edit-bridges', regions: 'edit-regions' })) $(`#${id}`).addEventListener('click', () => activateTool(tool));
 document.querySelectorAll('[data-step]').forEach(button => button.addEventListener('click', () => navigateStep(Number(button.dataset.step))));
 $('#step-next').addEventListener('click', () => navigateStep(state.workflowStep + 1));
-$('#step-back').addEventListener('click', () => navigateStep(state.workflowStep - 1));
+$('#step-back').addEventListener('click', () => navigateStep(state.workflowStep - 1, true));
 $('#toggle-controls').addEventListener('click', () => { state.controlsCollapsed = !state.controlsCollapsed; updateWorkspaceUI(state); queueWorkspaceSave(); });
 document.addEventListener('click', event => {
+  const trigger = event.target.closest('[popovertarget]');
+  const panel = trigger && document.getElementById(trigger.getAttribute('popovertarget'));
+  if (panel?.classList.contains('action-popover')) requestAnimationFrame(() => {
+    const anchor = trigger.getBoundingClientRect();
+    panel.style.left = `${Math.max(16, Math.min(anchor.left, innerWidth - panel.offsetWidth - 16))}px`;
+    panel.style.top = `${Math.max(16, Math.min(anchor.bottom + 8, innerHeight - panel.offsetHeight - 16))}px`;
+  });
   const tool = event.target.closest('[data-open-tool]');
   if (tool) activateTool(tool.dataset.openTool);
   if (event.target.closest('[data-review-types]')) reviewUncertainArea();
@@ -616,13 +698,47 @@ const previewPan = createPreviewPan({
   getPosition: () => ({ x: state.panX, y: state.panY }),
   setPosition: ({ x, y }) => { state.panX = x; state.panY = y; fitSheet(); },
   changed: queueWorkspaceSave,
+  modeChanged: mode => updatePanHint(state, mode),
 });
 function drawSelectionBox(start, end) {
-  $('#tab-selection-box')?.remove();
-  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-  rect.id = 'tab-selection-box';
+  let rect = $('#tab-selection-box');
+  if (!rect) {
+    rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.id = 'tab-selection-box';
+    preview.append(rect);
+  }
   for (const [key, value] of Object.entries({ x: Math.min(start.x, end.x), y: Math.min(start.y, end.y), width: Math.abs(end.x - start.x), height: Math.abs(end.y - start.y) })) rect.setAttribute(key, value);
-  preview.append(rect);
+}
+function selectionBounds(contour) {
+  if (!outlineBounds.has(contour)) {
+    let left = Infinity, right = -Infinity, top = Infinity, bottom = -Infinity;
+    for (const p of contour.points) {
+      left = Math.min(left, p.x); right = Math.max(right, p.x);
+      top = Math.min(top, p.y); bottom = Math.max(bottom, p.y);
+    }
+    outlineBounds.set(contour, { left, right, top, bottom });
+  }
+  return { regionId: contour.regionId, ...outlineBounds.get(contour) };
+}
+function updateLayerSelectionDrag() {
+  if (!drag || drag.kind !== 'layers') return;
+  if (drag.frame != null) cancelAnimationFrame(drag.frame);
+  drag.frame = null;
+  if (!drag.pendingPoint) return;
+  const point = svgPoint(drag.pendingPoint);
+  drag.pendingPoint = null;
+  if (!point) return;
+  const left = Math.min(drag.start.x, point.x), right = Math.max(drag.start.x, point.x);
+  const top = Math.min(drag.start.y, point.y), bottom = Math.max(drag.start.y, point.y);
+  // Enclosing any contour still selects its whole source layer.
+  const regions = new Set(drag.bounds.filter(b => b.left >= left && b.right <= right && b.top >= top && b.bottom <= bottom).map(b => b.regionId));
+  const selected = [...new Set([...drag.previous, ...state.scaled.contours.filter(c => regions.has(c.regionId)).map(c => c.id)])];
+  const previous = new Set(state.selectedOutlines);
+  if (selected.length !== previous.size || selected.some(id => !previous.has(id))) {
+    state.selectedOutlines = selected;
+    updateOutlineSelection();
+  }
+  drawSelectionBox(drag.start, point);
 }
 preview.addEventListener('pointerdown', e => {
   if (e.button !== 0 || drag) return;
@@ -631,7 +747,8 @@ preview.addEventListener('pointerdown', e => {
     commitSettings();
     drag = { kind: 'layers', pointerId: e.pointerId, x: e.clientX, y: e.clientY, start: svgPoint(e), moved: false,
       outlineId: e.target.closest('[data-visibility-outline]')?.dataset.visibilityOutline, additive: e.shiftKey,
-      previousSelection: [...state.selectedOutlines], previous: e.shiftKey ? [...state.selectedOutlines] : [] };
+      previousSelection: [...state.selectedOutlines], previous: e.shiftKey ? [...state.selectedOutlines] : [],
+      bounds: state.scaled.contours.filter(c => c.points.length && (state.showHiddenOutlines || !state.hiddenContours.includes(c.id))).map(selectionBounds) };
     if (e.isTrusted) preview.setPointerCapture(e.pointerId);
     e.preventDefault();
     return;
@@ -664,7 +781,7 @@ preview.addEventListener('click', e => {
   if (state.editingOutlines) {
     if (suppressOutlineClick && e.detail !== 0) { suppressOutlineClick = false; return; }
     const outline = e.target.closest('[data-visibility-outline]');
-    selectOutline(outline?.dataset.visibilityOutline, e.shiftKey);
+    selectOutline(outline?.dataset.visibilityOutline, e.shiftKey, true);
     return;
   }
   if (!state.editing || state.adding || e.detail !== 0) return;
@@ -676,17 +793,15 @@ preview.addEventListener('pointermove', e => {
   if (state.adding) return showGhost(e);
   if (!drag || drag.pointerId !== e.pointerId) return;
   if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 3) return;
+  if (drag.kind === 'layers') {
+    drag.moved = true;
+    drag.pendingPoint = { clientX: e.clientX, clientY: e.clientY };
+    if (drag.frame == null) drag.frame = requestAnimationFrame(updateLayerSelectionDrag);
+    return;
+  }
   const point = svgPoint(e); if (!point) return;
   drag.moved = true;
-  if (drag.kind === 'layers') {
-    const left = Math.min(drag.start.x, point.x), right = Math.max(drag.start.x, point.x);
-    const top = Math.min(drag.start.y, point.y), bottom = Math.max(drag.start.y, point.y);
-    // A contour enclosed by the rectangle selects its whole source layer.
-    const regions = new Set(state.scaled.contours.filter(c => (state.showHiddenOutlines || !state.hiddenContours.includes(c.id)) &&
-      c.points.length && c.points.every(p => p.x >= left && p.x <= right && p.y >= top && p.y <= bottom)).map(c => c.regionId));
-    state.selectedOutlines = [...new Set([...drag.previous, ...state.scaled.contours.filter(c => regions.has(c.regionId)).map(c => c.id)])];
-    render(); drawSelectionBox(drag.start, point);
-  } else if (drag.kind === 'box') {
+  if (drag.kind === 'box') {
     const start = drag.start;
     const inside = state.result.bridges.filter(b => (!drag.selectionContour || b.contourId === drag.selectionContour) && b.point.x >= Math.min(start.x, point.x) && b.point.x <= Math.max(start.x, point.x) && b.point.y >= Math.min(start.y, point.y) && b.point.y <= Math.max(start.y, point.y));
     state.selectedTabs = [...drag.previous];
@@ -706,13 +821,20 @@ preview.addEventListener('pointermove', e => {
 });
 function finishDrag(event, cancelled = false) {
   if (!drag || drag.pointerId !== event.pointerId) return;
+  if (drag.kind === 'layers') {
+    if (drag.frame != null) cancelAnimationFrame(drag.frame);
+    if (!cancelled && drag.moved) {
+      if (Number.isFinite(event.clientX) && Number.isFinite(event.clientY)) drag.pendingPoint = event;
+      updateLayerSelectionDrag();
+    }
+  }
   const finished = drag; drag = null;
   $('#tab-selection-box')?.remove();
   if (finished.kind === 'layers') {
     suppressOutlineClick = true;
-    if (cancelled) { state.selectedOutlines = finished.previousSelection; render(); }
+    if (cancelled) { state.selectedOutlines = finished.previousSelection; updateOutlineSelection(); }
     else if (finished.moved) queueWorkspaceSave();
-    else selectOutline(finished.outlineId, finished.additive);
+    else selectOutline(finished.outlineId, finished.additive, true);
   } else if (cancelled && finished.moved) restore(finished.before);
   else if (finished.moved && finished.kind === 'tabs') history.record(finished.before);
   if (preview.hasPointerCapture(event.pointerId)) preview.releasePointerCapture(event.pointerId);
@@ -727,7 +849,7 @@ $('#preview-svg').addEventListener('keydown', e => {
     if (!outline || !['Enter', ' ', 'Delete', 'Backspace'].includes(e.key)) return;
     e.preventDefault();
     const id = outline.dataset.visibilityOutline;
-    if (e.key === 'Enter' || e.key === ' ') selectOutline(id, e.shiftKey);
+    if (e.key === 'Enter' || e.key === ' ') selectOutline(id, e.shiftKey, true);
     else {
       if (!state.selectedOutlines.includes(id)) state.selectedOutlines = [id];
       setOutlineVisibility(state.selectedOutlines, false);
@@ -764,8 +886,10 @@ document.addEventListener('keydown', e => {
   if (e.defaultPrevented) return;
   if (e.key === 'Escape' && (state.adding || drag)) {
     e.preventDefault();
+    const layerDrag = drag?.kind === 'layers';
     if (drag) finishDrag({ pointerId: drag.pointerId }, true);
-    state.adding = false; clearGhost(); render();
+    state.adding = false; clearGhost();
+    if (!layerDrag) render();
     return;
   }
   if (state.editing && ['Delete', 'Backspace'].includes(e.key) && !e.metaKey && !e.ctrlKey && !e.altKey && !e.target.closest('input, textarea, [contenteditable="true"]') && selectedBridges().length) {
@@ -784,7 +908,7 @@ function loadSource(source, name, example = '') {
   try {
     const artwork = importSvg(source);
     state.sourceChosen = Boolean(state.source);
-    state.workflowStep = 1;
+    state.workflowStep = 1; state.activeTool = 'layers';
     bridgeEditor.cancel(); Object.assign(state, materialDefaults()); state.selectedRegionBridge = null; state.selectedRegionBridges = [];
     cancelAnimationFrame(renderFrame);
     state.artwork = artwork; state.source = source; state.example = example; state.name = name; state.sourceWarnings = artwork.warnings; state.zoom = 1; state.panX = state.panY = 0; previewPan.reset();

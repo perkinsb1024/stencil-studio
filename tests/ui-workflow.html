@@ -32,11 +32,46 @@ await check('Fresh workspace starts with sample artwork, plain step numbers and 
   assert(!d.body.textContent.includes('·'));
   assert(!d.body.textContent.includes('LIVE VECTOR PREVIEW') && !d.body.textContent.includes('UNITS: MM'));
 });
-await check('Step/tool navigation and selection keep the desktop canvas in place', async () => {
-  const original = $('#canvas-area').getBoundingClientRect();
+await check('Upload stays a large drop target, with samples collapsed immediately below', async () => {
+  const upload = $('#upload');
+  assert($('#toggle-controls').hidden);
+  assert(upload.getBoundingClientRect().height >= 170 && upload.textContent.includes('Drop'));
+  assert(upload.nextElementSibling.matches('.sample-options') && !upload.nextElementSibling.open);
+  await click('[data-example="orbit"]');
+  assert($('#upload').getBoundingClientRect().height >= 170 && $('#upload').textContent.includes('replace'));
+  await click('[data-example="bloom"]');
+});
+await check('Step destinations are explicit and returning from Artwork starts with Layers', async () => {
+  await click('#step-next'); assert(!$('#outline-inspector').hidden);
+  await click('#edit-tabs'); await click('#step-next');
+  assert($('#step-back').textContent === 'Back to Tabs');
+  await click('#step-back'); assert(!$('#tab-inspector').hidden);
+  await click('#step-back'); assert(!$('#artwork-step').hidden);
+  assert($('#step-next').textContent === 'Continue to Layers');
+  await click('#step-next'); assert(!$('#outline-inspector').hidden);
+  await click('#edit-regions'); await click('[data-step="3"]'); await click('[data-step="2"]');
+  assert(!$('#outline-inspector').hidden);
+  await click('[data-step="1"]');
+});
+await check('Switching editing tools keeps the desktop canvas in place', async () => {
   await click('#step-next');
+  const original = $('#canvas-area').getBoundingClientRect();
   for (const tool of ['#edit-tabs', '#edit-bridges', '#edit-regions', '#edit-outlines']) { await click(tool); const current = $('#canvas-area').getBoundingClientRect(); assert(Math.abs(current.top - original.top) < 1 && Math.abs(current.height - original.height) < 1, tool); }
   assert($('#outline-inspector').closest('.inspector') && !$('#outline-inspector').closest('.preview-panel'));
+});
+await check('Tools sit above the workspace; actions and type help are beside the list', async () => {
+  assert(!$('#shape-header').closest('.inspector'));
+  assert($('#shape-header').getBoundingClientRect().bottom <= $('.workspace').getBoundingClientRect().top + 1);
+  assert(w.getComputedStyle($('#outline-list')).overflowY === 'visible');
+  await click('[popovertarget="layer-actions"]');
+  assert($('#layer-actions').matches(':popover-open') && $('#show-all-outlines').getBoundingClientRect().width > 0);
+  $('#layer-actions').hidePopover();
+  await click('[popovertarget="type-guide"]'); assert($('#type-guide').matches(':popover-open'));
+  $('#type-guide').hidePopover();
+  await click('[popovertarget="stencil-settings"]');
+  assert($('#channelWidth').closest('#stencil-settings') && $('#reset').getBoundingClientRect().width > 0);
+  await click('#edit-tabs'); assert(!$('#stencil-settings').matches(':popover-open'));
+  await click('#edit-outlines');
 });
 await check('Reviewing/skipping types only selects artwork; keeping a type resolves one decision', async () => {
   const before = cuts(), history = saved().history.past.length;
@@ -109,7 +144,7 @@ await check('Draft polygons survive step navigation and remain excluded from fin
   $('#preview-svg').dispatchEvent(new w.MouseEvent('click', { bubbles: true, detail: 1, clientX: point.x, clientY: point.y }));
   const before = cuts(), draft = saved().ui.regionDraft;
   await click('[data-step="3"]'); assert(cuts() === before, 'Review changed finished cuts');
-  await click('[data-step="2"]'); assert(saved().ui.regionDraft.length === draft.length && saved().ui.drawingRegion, `Draft lost: ${JSON.stringify(saved().ui.regionDraft)}, drawing=${saved().ui.drawingRegion}`);
+  await click('#step-back'); assert(saved().ui.activeTool === 'regions'); assert(saved().ui.regionDraft.length === draft.length && saved().ui.drawingRegion, `Draft lost: ${JSON.stringify(saved().ui.regionDraft)}, drawing=${saved().ui.drawingRegion}`);
   await click('#cancel-region');
 });
 await check('Review checks material without opening Bridges and keeps types nonblocking', async () => {
@@ -147,6 +182,9 @@ await check('Phone and tablet layouts have no horizontal overflow and keep the e
     await click('#toggle-controls');
     await click('#edit-bridges'); await click('#edit-regions'); await click('#edit-outlines');
     assert(d.documentElement.scrollWidth <= w.innerWidth, `${width}: tools overflow`);
+    await click('[data-step="1"]');
+    assert($('#toggle-controls').hidden && parseFloat(w.getComputedStyle($('#artwork-step')).paddingLeft) >= 16);
+    await click('#step-next');
   }
   frame.style.width = '1280px';
 });

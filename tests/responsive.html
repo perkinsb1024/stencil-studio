@@ -11,6 +11,7 @@ for (const name of ['mobile','tablet']) {
   const settle=()=>new Promise(resolve=>w.requestAnimationFrame(()=>w.requestAnimationFrame(resolve)));
   const valid=()=>d.documentElement.scrollWidth<=w.innerWidth && !!d.querySelector('.cut-shape')?.getAttribute('d');
   let pass=valid();
+  d.querySelector('#edit-outlines').click(); await settle();
   const initial=d.querySelector('#preview-svg').getBoundingClientRect();
   d.querySelector('#edit-tabs').click(); await settle();
   const unselected=d.querySelector('#canvas-area').getBoundingClientRect();

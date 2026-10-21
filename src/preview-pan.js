@@ -1,11 +1,12 @@
 // Share pointer ownership between view navigation and the SVG editing tools.
-export function createPreviewPan({ viewport, enabled, active = () => true, defaultDrag = () => true, getPosition, setPosition, button, changed = () => {} }) {
+export function createPreviewPan({ viewport, enabled, active = () => true, defaultDrag = () => true, getPosition, setPosition, button, changed = () => {}, modeChanged = () => {} }) {
   let gesture = null, space = false, spaceUsed = false, mode = false, suppressClickUntil = 0;
   const available = () => active() && enabled();
   const ready = () => available() && (space || mode || defaultDrag());
   function refresh() {
     viewport.classList.toggle('pan-ready', ready());
     viewport.classList.toggle('is-panning', !!gesture);
+    modeChanged(mode && available());
     if (button) {
       button.disabled = !enabled();
       button.setAttribute('aria-pressed', mode && enabled() ? 'true' : 'false');

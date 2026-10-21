@@ -41,6 +41,7 @@ await load(() => { frame.src = '/?workspace=outline-editing-tests&live-reload=of
 let originalCuts, dimensions, customCuts, customLayout;
 await check('Outline mode has thumbnails, visible checkboxes, selection targets and an active tool', async () => {
   originalCuts = cuts(); dimensions = [$('#dimension-width').textContent, $('#dimension-height').textContent];
+  await click('#edit-tabs');
   const size = $('#preview-svg').getBoundingClientRect();
   await click('#edit-outlines');
   assert(!$('#outline-inspector').hidden && $('#tab-inspector').hidden);
@@ -57,11 +58,53 @@ await check('Canvas and list selections synchronize; Shift toggles multiple outl
   await click('#select-outline-1', true); assert(selected().length === 2);
   await click(outline(0), true); assert(selected().length === 1 && $('#select-outline-1').getAttribute('aria-pressed') === 'true');
 });
+await check('Rectangle selection batches pointer moves and preserves geometry and layer elements', async () => {
+  const svg = $('#preview-svg'), bounds = svg.getBoundingClientRect();
+  const cut = $('.cut-shape'), target = $(outline(0)), card = $('.layer-card');
+  const execute = w.ClipperLib.Clipper.prototype.Execute;
+  const request = w.requestAnimationFrame, cancel = w.cancelAnimationFrame;
+  const frames = new Map(); let serial = 0, geometryCalls = 0;
+  const pointer = (type, x, y) => svg.dispatchEvent(new w.PointerEvent(type, { bubbles: true, pointerId: 43, button: 0, clientX: x, clientY: y }));
+  w.ClipperLib.Clipper.prototype.Execute = function(...args) { geometryCalls++; return execute.apply(this, args); };
+  w.requestAnimationFrame = callback => { frames.set(++serial, callback); return serial; };
+  w.cancelAnimationFrame = id => frames.delete(id);
+  const paint = () => { const callbacks = [...frames.values()]; frames.clear(); for (const callback of callbacks) callback(w.performance.now()); };
+  try {
+    pointer('pointerdown', bounds.left + 1, bounds.top + 1);
+    pointer('pointermove', bounds.left + 8, bounds.top + 8);
+    pointer('pointermove', bounds.right - 1, bounds.bottom - 1);
+    assert(frames.size === 1, 'Pointer moves were not coalesced');
+    paint();
+    assert(selected().length === 2, 'Frame did not use the latest pointer position');
+    const rectangle = $('#tab-selection-box');
+    pointer('pointermove', bounds.right - 2, bounds.bottom - 2); paint();
+    assert($('#tab-selection-box') === rectangle, 'Selection rectangle was replaced');
+    assert($('.cut-shape') === cut && $(outline(0)) === target, 'Canvas geometry was replaced');
+    assert($('.layer-card') === card, 'Layer sidebar was rebuilt');
+    // Releasing before the next frame must commit the final pointer position.
+    pointer('pointermove', bounds.right - 1, bounds.bottom - 1);
+    pointer('pointerup', bounds.left + 8, bounds.top + 8);
+    assert(selected().length === 0 && !$('#tab-selection-box'), 'Quick release used stale selection');
+    assert(frames.size === 0, 'Selection frame survived release');
+    pointer('pointerdown', bounds.left + 1, bounds.top + 1);
+    pointer('pointermove', bounds.right - 1, bounds.bottom - 1);
+    paint();
+    d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    assert(selected().length === 0 && frames.size === 0 && !$('#tab-selection-box'), 'Escape did not cancel selection');
+    assert(geometryCalls === 0, 'Selection recalculated stencil geometry');
+    assert($('.cut-shape') === cut, 'Cancellation replaced geometry');
+  } finally {
+    pointer('pointercancel', bounds.left, bounds.top);
+    w.ClipperLib.Clipper.prototype.Execute = execute;
+    w.requestAnimationFrame = request; w.cancelAnimationFrame = cancel;
+  }
+});
 await check('Rectangle selection changes several layer types with a single undo', async () => {
   const svg = $('#preview-svg'), bounds = svg.getBoundingClientRect();
   const pointer = (type, x, y, target = svg, extra = {}) => target.dispatchEvent(new w.PointerEvent(type, { bubbles: true, pointerId: 42, button: 0, clientX: x, clientY: y, ...extra }));
   pointer('pointerdown', bounds.left + 1, bounds.top + 1);
   pointer('pointermove', bounds.right - 1, bounds.bottom - 1);
+  await sleep(25);
   assert($('#tab-selection-box'), 'Selection rectangle missing');
   pointer('pointerup', bounds.right - 1, bounds.bottom - 1);
   svg.dispatchEvent(new w.MouseEvent('click', { bubbles: true, detail: 1 }));
@@ -89,6 +132,26 @@ await check('Rectangle selection changes several layer types with a single undo'
   pointer('pointermove', bounds.right - 1, bounds.bottom - 1);
   pointer('pointercancel', bounds.right - 1, bounds.bottom - 1);
   assert(selected().length === 1 && $('#select-outline-1').getAttribute('aria-pressed') === 'true');
+});
+await check('Selected filter follows reverse rectangle drags and cancellation', async () => {
+  await change('#layer-filter', 'selected');
+  const svg = $('#preview-svg'), bounds = svg.getBoundingClientRect(), cut = $('.cut-shape');
+  const pointer = (type, x, y) => svg.dispatchEvent(new w.PointerEvent(type, { bubbles: true, pointerId: 44, button: 0, clientX: x, clientY: y }));
+  assert(d.querySelectorAll('.layer-card').length === 1, 'Selected filter lost current selection');
+  pointer('pointerdown', bounds.right - 1, bounds.bottom - 1);
+  pointer('pointermove', bounds.left + 1, bounds.top + 1);
+  pointer('pointerup', bounds.left + 1, bounds.top + 1);
+  assert(selected().length === 2, 'Reverse drag did not update selected filter');
+  pointer('pointerdown', bounds.left + 1, bounds.top + 1);
+  pointer('pointermove', bounds.left + 8, bounds.top + 8);
+  await sleep(25);
+  assert(d.querySelectorAll('.layer-card').length === 0, 'Empty selection left filtered rows');
+  pointer('pointercancel', bounds.left + 8, bounds.top + 8);
+  await sleep(25);
+  assert(selected().length === 2 && !$('#tab-selection-box'), 'Cancelled frame changed restored selection');
+  assert($('.cut-shape') === cut, 'Filtered selection rebuilt geometry');
+  await change('#layer-filter', 'all');
+  await click('#select-outline-1');
 });
 await check('Hiding updates cuts and guides without moving or resizing artwork', async () => {
   await click('#hide-outlines');
@@ -187,6 +250,16 @@ await check('Compound transformed paths and open outlines remain independently h
   for (let i = 0; i < 50 && $('#filename').textContent !== 'compound.svg'; i++) await sleep(20);
   await click('#use-all-outlines'); await click('#edit-outlines');
   assert(d.querySelectorAll('[data-visible-outline]').length === 3);
+  const svg = $('#preview-svg'), inner = $(outline(1)).getBBox(), matrix = svg.getScreenCTM();
+  const start = new w.DOMPoint(inner.x - 1, inner.y - 1).matrixTransform(matrix);
+  const end = new w.DOMPoint(inner.x + inner.width + 1, inner.y + inner.height + 1).matrixTransform(matrix);
+  const pointer = (type, point) => svg.dispatchEvent(new w.PointerEvent(type, { bubbles: true, pointerId: 45, button: 0, clientX: point.x, clientY: point.y }));
+  pointer('pointerdown', start); pointer('pointermove', end); pointer('pointerup', end);
+  assert(selected().length === 1 && $(outline(0)).classList.contains('selected') && $(outline(1)).classList.contains('selected'), 'Enclosed child did not select its whole source layer');
+  const details = $('.compound-children'); details.open = true;
+  await click('#select-outline-1');
+  assert($('.compound-children') === details && details.open, 'Selection replaced the expanded compound layer');
+  assert($('#select-outline-1').getAttribute('aria-pressed') === 'true' && $('#select-outline-0').getAttribute('aria-pressed') === 'false', 'Compound child selection did not synchronize');
   const before = [$('#dimension-width').textContent, $('#dimension-height').textContent];
   await click('#visible-outline-1'); await click('#visible-outline-2');
   assert($('#outline-count').textContent === '1 of 2 Visible');

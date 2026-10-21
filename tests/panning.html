@@ -37,7 +37,7 @@ await load(()=>{frame.src='/?workspace=panning-tests&live-reload=off';});
 let originalCuts, panned;
 await check('Live preview pans with a plain drag at higher zoom, without changing cuts or history',async()=>{
  originalCuts=cuts();
- assert($('#pan-preview').disabled);
+ assert($('#pan-preview').disabled && $('#pan-preview').hidden);
  await click('#zoom-in');await click('#zoom-in');await click('#zoom-in');await click('#zoom-in');
  assert($('#canvas-viewport').classList.contains('pan-ready'));
  const history=JSON.stringify(saved().history);
@@ -64,12 +64,23 @@ await check('Pan tool overrides outline selection and suppresses the following c
  for(let i=0;i<4;i++) await click('#zoom-in');
  await click('#edit-outlines');await click('#select-outline-0');
  assert(!$('#canvas-viewport').classList.contains('pan-ready'));
+ assert(!$('#pan-preview').hidden);
  await click('#pan-preview');assert($('#pan-preview').getAttribute('aria-pressed')==='true');
+ assert($('#move-view-hint').textContent.includes('Pan is on'));
  drag($('[data-visibility-outline="outline-1"]'),30,20);
  $('[data-visibility-outline="outline-1"]').dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:1}));
  assert(position().x===30&&position().y===20);
  assert($('#select-outline-0').getAttribute('aria-pressed')==='true'&&$('#select-outline-1').getAttribute('aria-pressed')==='false');
  await click('#pan-preview');
+});
+await check('Switching tools clears the Pan override and reviewing hides the redundant button',async()=>{
+ await click('#pan-preview');
+ await click('#edit-tabs');
+ assert($('#pan-preview').getAttribute('aria-pressed')==='false' && !$('#canvas-viewport').classList.contains('pan-ready'));
+ await click('[data-step="3"]');
+ assert($('#pan-preview').hidden && $('#canvas-viewport').classList.contains('pan-ready'));
+ assert($('#move-view-hint').textContent.includes('Drag to pan'));
+ await click('#step-back');
 });
 await check('Space and middle-mouse panning preserve tab layouts during editing',async()=>{
  await click('#edit-tabs');
@@ -125,6 +136,7 @@ await check('Simplify preview pans by mouse and touch drag, preserving geometry'
 await check('Live touch panning works on a phone and new artwork resets the view',async()=>{
  frame.style.width='390px';await sleep(100);
  await click('#edit-regions');await click('#zoom-fit');await click('#zoom-in');await click('#zoom-in');
+ await click('#pan-preview');
  drag($('#preview-svg'),20,15,{pointerType:'touch'});assert(position().x===20&&position().y===15);
  assert(d.documentElement.scrollWidth<=w.innerWidth,'Mobile overflow');
  await click('[data-example="orbit"]');assert(position().x===0&&position().y===0&&$('#zoom-label').textContent==='100%');
