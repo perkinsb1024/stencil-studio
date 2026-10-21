@@ -1,4 +1,4 @@
-import { configureLengthControls, formatLength, gridMarkup, setLengthValue, toMillimeters } from './units.js';
+import { configureLengthControls, displayLength, formatLength, gridMarkup, setLengthValue, toMillimeters } from './units.js';
 import { drawMarginSelection, clearMarginSelection } from './selection-overlay.js';
 import { createBusyTask } from './busy-task.js';
 import { updateWorkspaceUI, updatePanHint } from './workspace-ui.js';
@@ -55,7 +55,7 @@ const inspectorHeader = document.createElement('div');
 inspectorHeader.id = 'shape-header';
 inspectorHeader.className = 'inspector-header';
 inspectorHeader.hidden = true;
-inspectorHeader.append($('.size-section'));
+inspectorHeader.append($('.size-section'), $('#stencil-settings'));
 $('.workspace').before(inspectorHeader);
 $('.preview-panel').prepend($('.tab-edit-toolbar'));
 $('.inspector-body').before($('#toggle-controls'));
@@ -1253,7 +1253,13 @@ function syncPreviewPreferences() {
     button.setAttribute('aria-pressed', String(active));
   });
   $('#show-grid').checked = state.showGrid;
-  $('#grid-spacing').value = state.gridSpacing / 25.4;
+  $('#grid-spacing-control').hidden = !state.showGrid;
+  const gridSlider = $('#grid-spacing');
+  const inches = state.units === 'in';
+  gridSlider.min = inches ? 0.2 : 4;
+  gridSlider.max = inches ? 4 : 101;
+  gridSlider.step = inches ? 0.1 : 1;
+  gridSlider.value = displayLength(state.gridSpacing, state);
   $('#grid-spacing-value').textContent = formatLength(state.gridSpacing, state);
   $('#grid-spacing').setAttribute('aria-valuetext', formatLength(state.gridSpacing, state));
   updateRangePaint();
@@ -1264,10 +1270,10 @@ document.querySelectorAll('[data-units]').forEach(button => button.addEventListe
   syncPreviewPreferences(); syncSettingInputs(); render(); queueWorkspaceSave();
 }));
 $('#show-grid').addEventListener('change', e => {
-  state.showGrid = e.target.checked; render(); queueWorkspaceSave();
+  state.showGrid = e.target.checked; syncPreviewPreferences(); render(); queueWorkspaceSave();
 });
 $('#grid-spacing').addEventListener('input', e => {
-  state.gridSpacing = Number(e.target.value) * 25.4;
+  state.gridSpacing = toMillimeters(Number(e.target.value), state);
   syncPreviewPreferences(); scheduleRender(); queueWorkspaceSave();
 });
 for (const mode of ['material', 'cut']) $(`#${mode}-view`).addEventListener('click', () => {

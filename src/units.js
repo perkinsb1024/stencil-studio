@@ -28,5 +28,5 @@ export function configureLengthControls(state) {
 }
 
 export function gridMarkup(width, height, spacing) {
-  return `<g id="preview-grid" pointer-events="none" aria-hidden="true"><defs><pattern id="preview-grid-pattern" width="${spacing}" height="${spacing}" patternUnits="userSpaceOnUse"><path d="M ${spacing} 0 H 0 V ${spacing}" fill="none" stroke="#80718c" stroke-opacity="0.4" stroke-width="0.7" vector-effect="non-scaling-stroke"/></pattern></defs><rect width="${width}" height="${height}" fill="url(#preview-grid-pattern)"/></g>`;
+  return `<g id="preview-grid" pointer-events="none" aria-hidden="true"><defs><pattern id="preview-grid-pattern" width="${spacing}" height="${spacing}" patternUnits="userSpaceOnUse"><path d="M ${spacing} 0 H 0 V ${spacing}" fill="none" stroke="#707070" stroke-opacity="0.5" stroke-width="0.7" vector-effect="non-scaling-stroke"/></pattern></defs><rect width="${width}" height="${height}" fill="url(#preview-grid-pattern)"/></g>`;
 }

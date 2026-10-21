@@ -29,16 +29,18 @@ export function updateWorkspaceUI(state) {
     else button.removeAttribute('aria-current');
   }
   for (const [id, number] of [['artwork-step', 1], ['shape-step', 2], ['export-step', 3]]) $(`#${id}`).hidden = step !== number;
-  $('#shape-header').hidden = step !== 2;
+  const showHeader = step >= 1 && step <= 3;
+  $('#shape-header').hidden = !showHeader;
+  $('#shape-header h1').textContent = ({ 1: 'Your Artwork', 2: 'Shape Your Stencil', 3: 'Review & Export' })[step];
   const documentBar = $('.document-bar');
   const header = $('.size-section .section-heading');
   for (const selector of ['.document-title', '.history-actions']) {
     const control = $(selector);
-    if (step === 2) {
+    if (showHeader) {
       if (control.parentElement !== header) header.insertBefore(control, header.querySelector('[popovertarget="stencil-settings"]'));
     } else if (control.parentElement !== documentBar) documentBar.append(control);
   }
-  documentBar.hidden = step === 2;
+  documentBar.hidden = showHeader;
   $('.tab-edit-toolbar').hidden = step !== 2;
   $('#step-back').hidden = step === 1;
   $('#step-next').hidden = step === 3;
