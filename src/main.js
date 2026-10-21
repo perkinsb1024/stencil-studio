@@ -16,6 +16,7 @@ import { createPreviewPan } from './preview-pan.js';
 import { createBridgeEditor, bridgePanel } from './bridge-editor.js';
 import { materialMode, scaleBridges } from './material-geometry.js';
 import { suggestionDefaults, treatmentLabel } from './area-suggestions.js';
+import { installCustomSelects } from './custom-select.js';
 
 const icons = {
   upload: '<path d="M12 16V4m-4 4 4-4 4 4M4 15v5h16v-5"/>',
@@ -870,7 +871,7 @@ const preview = $('#preview-svg');
 const selectionViewport = $('#canvas-viewport');
 const previewPan = createPreviewPan({
   viewport: $('#canvas-viewport'), button: $('#pan-preview'),
-  enabled: () => state.zoom > 1,
+  enabled: () => state.zoom >= 1,
   active: () => !document.querySelector('dialog[open]'),
   defaultDrag: () => !state.editing && !state.editingOutlines && !state.editingRegions && !state.editingBridges,
   getPosition: () => ({ x: state.panX, y: state.panY }),
@@ -1426,3 +1427,46 @@ window.addEventListener('beforeunload', flushWorkspace);
 window.addEventListener('scroll', queueWorkspaceSave, { passive: true });
 $('#canvas-viewport').addEventListener('scroll', queueWorkspaceSave, { passive: true });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushWorkspace(); });
+
+installCustomSelects($('#app'), (select, value) => {
+  if (!value || !state.scaled || !state.result) return;
+  let paths = [], point = null;
+  if (select.id === 'bridge-picker') {
+    const bridge = state.result.regionBridges?.find(bridge => bridge.id === value);
+    if (bridge) paths = [bridge.polygon];
+  } else if (select.id === 'tab-picker') {
+    const tab = state.result.bridges.find(tab => tab.id === value && tab.contourId === state.selectedContour);
+    if (tab) { paths = tab.segments; point = tab.point; }
+  } else if (select.id === 'region-picker') {
+    const region = state.scaled.regions?.find(region => region.id === value);
+    if (region) paths = [region.points];
+  } else {
+    let ids = [];
+    if (['outline-picker', 'region-scope'].includes(select.id)) ids = value === 'all' ? state.scaled.contours.map(c => c.id) : [value];
+    else if (select.dataset.treatmentOutline) {
+      const contour = state.artwork.contours.find(c => c.id === select.dataset.treatmentOutline);
+      ids = state.artwork.contours.filter(c => c.regionId === contour?.regionId).map(c => c.id);
+    } else if (select.id === 'selected-layer-treatment') ids = state.selectedOutlines;
+    else if (select.id === 'review-treatment') ids = state.artwork.contours.filter(c => c.regionId === state.reviewRegion).map(c => c.id);
+    paths = state.scaled.contours.filter(c => ids.includes(c.id)).map(c => c.points);
+  }
+  const points = paths.flat();
+  if (!points.length) return;
+  const bounds = points.reduce((b, p) => ({ minX: Math.min(b.minX, p.x), minY: Math.min(b.minY, p.y), maxX: Math.max(b.maxX, p.x), maxY: Math.max(b.maxY, p.y) }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+  const center = point ?? {
+    x: (bounds.minX + bounds.maxX) / 2,
+    y: (bounds.minY + bounds.maxY) / 2,
+  };
+  fitSheet(center);
+  const overlay = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  overlay.classList.add('dropdown-preview');
+  overlay.setAttribute('aria-hidden', 'true');
+  for (const points of paths) {
+    const path = document.createElementNS(overlay.namespaceURI, 'path');
+    path.setAttribute('d', pathData(points, select.id !== 'tab-picker'));
+    path.setAttribute('vector-effect', 'non-scaling-stroke');
+    overlay.append(path);
+  }
+  $('#preview-svg').append(overlay);
+  return () => overlay.remove();
+});

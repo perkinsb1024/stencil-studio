@@ -240,7 +240,7 @@ await check('Region controls and active tools fit mobile and tablet layouts', as
     saved(); await load(() => w.location.reload());
     assert(d.documentElement.scrollWidth <= width, `Overflow at ${width}px`);
     caret('#region-inspector', '#edit-regions');
-    const region = $('#region-picker').getBoundingClientRect(), scope = $('#region-scope').getBoundingClientRect();
+    const region = $('#region-picker-trigger').getBoundingClientRect(), scope = $('#region-scope-trigger').getBoundingClientRect();
     const widthControl = $('#region-width-range').getBoundingClientRect(), taperControl = $('#region-taper-length-range').getBoundingClientRect();
     assert(region.bottom < scope.top && scope.bottom < widthControl.top, 'Dropdowns are not stacked above sliders');
     assert(widthControl.width > 0 && taperControl.width > 0, 'Sliders are not accessible');

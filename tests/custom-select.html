@@ -1,0 +1,81 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Custom dropdown checks</title>
+<style>body{font:14px system-ui;padding:24px}iframe{width:1200px;height:1400px}.fail{color:#a00}</style>
+<h1>Custom dropdown checks</h1><p id="summary">Running…</p><ol id="results"></ol><iframe title="Editor"></iframe>
+<script type="module">
+import { previewReady } from './preview-ready.js';
+const frame = document.querySelector("iframe");
+localStorage.removeItem("stencil-studio.workspace.v1:custom-select-tests");
+await new Promise(resolve => { frame.onload = resolve; frame.src = "/?workspace=custom-select-tests&live-reload=off"; });
+const d = frame.contentDocument, w = frame.contentWindow;
+w.requestAnimationFrame = callback => w.setTimeout(() => callback(w.performance.now()), 16);
+w.cancelAnimationFrame = id => w.clearTimeout(id);
+try {
+
+const $ = s => d.querySelector(s);
+const wait = async () => { await new Promise(r => setTimeout(r, 180)); await previewReady(d); };
+const checks = [];
+const assert = (v, m) => { if (!v) throw Error(m); checks.push(m); };
+await wait();
+assert(!!$("#tab-picker-trigger"), "Custom selects initialized");
+$("#edit-tabs").click(); await wait();
+const before = $("#tab-picker").value;
+$("#tab-picker-trigger").click();
+assert($("#custom-select-options").matches(":popover-open"), "Tab dropdown opens");
+const row = $("#custom-select-options").children[1];
+row.dispatchEvent(new w.PointerEvent("pointerenter"));
+assert(!!$(".dropdown-preview"), "Hover highlights tab");
+assert($("#tab-picker").value === before, "Hover preserves selection");
+await new Promise(r => setTimeout(r, 400));
+const bounds = $(".dropdown-preview").getBBox();
+const center = new w.DOMPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2).matrixTransform($("#preview-svg").getScreenCTM());
+const viewport = $("#canvas-viewport").getBoundingClientRect();
+assert(Math.abs(center.x - (viewport.x + viewport.width / 2)) < 5, "Hover centers tab horizontally: " + center.x + " vs " + (viewport.x + viewport.width / 2));
+row.click(); await wait();
+assert($("#tab-picker").value !== before, "Click commits tab selection");
+assert(!$(".dropdown-preview"), "Click clears temporary highlight");
+assert($("#zoom-label").textContent === '100%' && !$("#pan-preview").disabled, 'Pan is available at 100% after centering');
+$("#pan-preview").click();
+const transform = $("#sheet-wrap").style.transform;
+const viewportBounds = $("#canvas-viewport").getBoundingClientRect();
+for (const [type, dx] of [['pointerdown', 0], ['pointermove', 40], ['pointerup', 40]]) {
+  $("#preview-svg").dispatchEvent(new w.PointerEvent(type, { bubbles: true, isPrimary: true, pointerId: 9, button: 0, clientX: viewportBounds.x + 100 + dx, clientY: viewportBounds.y + 100 }));
+}
+assert($("#sheet-wrap").style.transform !== transform, 'Pan moves the centered canvas at 100%: ' + transform + ' -> ' + $("#sheet-wrap").style.transform + ' mode=' + $("#pan-preview").getAttribute('aria-pressed'));
+$("#pan-preview").click();
+$("#outline-picker-trigger").click();
+$("#custom-select-options").children[0].dispatchEvent(new w.PointerEvent("pointerenter"));
+assert(!!$(".dropdown-preview"), "Object hover highlights contour");
+$("#outline-picker-trigger").dispatchEvent(new w.KeyboardEvent("keydown", {key:"Escape", bubbles:true}));
+assert(!$(".dropdown-preview") && !$("#custom-select-options").matches(":popover-open"), "Escape closes and clears preview");
+$("[data-example=football]").click(); await wait();
+$("#edit-bridges").click(); await wait(); $("#generate-bridges").click();
+for(let i=0;i<80 && $("#bridge-picker").options.length<2;i++) await wait();
+$("#bridge-picker-trigger").click();
+$("#custom-select-options").children[1].dispatchEvent(new w.PointerEvent("pointerenter"));
+assert(!!$(".dropdown-preview"), "Bridge hover highlights footprint");
+assert(!$("#bridge-picker").value, "Bridge hover preserves selection");
+$("#bridge-picker-trigger").dispatchEvent(new w.KeyboardEvent("keydown", {key:"ArrowDown", bubbles:true}));
+$("#bridge-picker-trigger").dispatchEvent(new w.KeyboardEvent("keydown", {key:"Enter", bubbles:true}));
+await wait(); assert(!!$("#bridge-picker").value, "Keyboard commits bridge selection");
+$("#treatment-outline-0").value = 'outline';
+$("#treatment-outline-0").dispatchEvent(new w.Event('change', { bubbles:true })); await wait();
+$("#edit-regions").click(); await wait();
+$("#draw-region").click();
+for (const [x, y] of [[20,20], [40,20], [40,40]]) {
+  const point = new w.DOMPoint(x,y).matrixTransform($("#preview-svg").getScreenCTM());
+  $("#preview-svg").dispatchEvent(new w.MouseEvent('click', { bubbles:true, detail:1, clientX:point.x, clientY:point.y }));
+  await wait();
+}
+$("#finish-region").click(); await wait(); $("#cancel-region").click(); await wait();
+$("#region-picker-trigger").click();
+$("#custom-select-options").children[1].dispatchEvent(new w.PointerEvent('pointerenter'));
+assert(!!$(".dropdown-preview"), 'Region hover highlights its boundary');
+$("#region-picker-trigger").dispatchEvent(new w.KeyboardEvent('keydown', {key:'Escape', bubbles:true}));
+document.querySelector("#summary").textContent = `${checks.length} passed, 0 failed`;
+for (const check of checks) { const li = document.createElement("li"); li.textContent = check; document.querySelector("#results").append(li); }
+
+} catch (error) {
+ document.querySelector("#summary").textContent = "0 passed, 1 failed";
+ const li = document.createElement("li"); li.className = "fail"; li.textContent = error.message; document.querySelector("#results").append(li);
+}
+</script></html>

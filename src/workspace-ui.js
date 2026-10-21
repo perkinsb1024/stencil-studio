@@ -12,7 +12,7 @@ export function issueTool(message) {
 
 export function updatePanHint(state, mode = $('#pan-preview').getAttribute('aria-pressed') === 'true') {
   let hint = 'Drag to select or edit. Zoom in to pan the canvas.';
-  if (state.zoom > 1) {
+  if (state.zoom >= 1) {
     if (state.workflowStep !== 2) hint = 'Drag to pan the zoomed canvas.';
     else if (mode) hint = 'Pan is on. Drag to move the canvas. Tap Space to turn Pan off and edit.';
     else hint = 'Drag to select or edit. Tap Space to toggle Pan, or hold Space and drag to pan.';
@@ -46,7 +46,7 @@ export function updateWorkspaceUI(state) {
   $('#step-back').textContent = step === 3 ? `Back to ${toolName}` : 'Back to Artwork';
   $('#step-next').textContent = step === 2 ? 'Continue to Review' : `Continue to ${toolName}`;
   $('#pan-preview').hidden = step !== 2;
-  $('#pan-preview').title = state.zoom > 1 ? 'Toggle between dragging to pan and editing artwork' : 'Zoom in to pan while editing';
+  $('#pan-preview').title = state.zoom >= 1 ? 'Toggle between dragging to pan and editing artwork' : 'Zoom to 100% to pan while editing';
   updatePanHint(state);
   $('#region-channel-summary').textContent = `Default channel width: ${formatLength(state.channelWidth, state)}`;
   $('#toggle-controls').hidden = step !== 2;

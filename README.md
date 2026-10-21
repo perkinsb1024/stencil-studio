@@ -26,7 +26,9 @@ Paths, compound paths, standard shapes, and transforms are supported. Convert ma
 
 ## Zooming and panning
 
-In the live vector preview or Simplify SVG view, zoom above 100% and drag the artwork to pan. Mouse and single-finger touch drags move the view; the hand cursor shows when dragging will pan. In the live preview's editing modes, use **Pan** beside the zoom controls, hold **Space** while dragging, or drag with the middle mouse button. Normal editing gestures still select outlines, move tabs, draw regions, or select tabs with a rectangle when Pan is off. Toggle Pan off to return to those gestures.
+In the live vector preview, pan at 100% zoom or higher. In Simplify SVG view, zoom above 100% to pan. Mouse and single-finger touch drags move the view; the hand cursor shows when dragging will pan. In the live preview's editing modes, use **Pan** beside the zoom controls, hold **Space** while dragging, or drag with the middle mouse button. Normal editing gestures still select outlines, move tabs, draw regions, or select tabs with a rectangle when Pan is off. Toggle Pan off to return to those gestures.
+
+Hover over bridge, tab, object, or region options in the custom dropdowns to highlight and center them at the current zoom. Click or press Enter to select; arrow keys preview options, typing finds a matching label, and Escape dismisses the menu. Hovering leaves the current selection intact.
 
 **Fit** recenters the artwork and returns to 100%. Panning stays within the artwork's zoomed bounds. Escape or a cancelled touch gesture restores the starting position of a pan. Live preview offsets recover after reload and are included in session exports, without adding undo steps or changing cut geometry. Loading new artwork resets zoom and pan. Simplify also supports its existing scrollbars and trackpad scrolling.
 

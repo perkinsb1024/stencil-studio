@@ -40,7 +40,7 @@ export function createPreviewPan({ viewport, enabled, active = () => true, defau
   for (const type of ['click', 'auxclick']) viewport.addEventListener(type, event => {
     if (event.detail && (ready() || performance.now() < suppressClickUntil)) { event.preventDefault(); event.stopImmediatePropagation(); }
   }, true);
-  const typing = target => target.closest('input, textarea, select, [contenteditable="true"]');
+  const typing = target => target.closest('input, textarea, select, [role="combobox"], [contenteditable="true"]');
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && gesture) {
       stop(null, true); event.preventDefault(); event.stopImmediatePropagation(); return;

@@ -38,7 +38,7 @@ await load(()=>{frame.src='/?workspace=panning-tests&live-reload=off';});
 let originalCuts, panned;
 await check('Live preview pans with a plain drag at higher zoom, without changing cuts or history',async()=>{
  originalCuts=cuts();
- assert($('#pan-preview').disabled && $('#pan-preview').hidden);
+ assert(!$('#pan-preview').disabled && $('#pan-preview').hidden);
  await click('#zoom-in');await click('#zoom-in');await click('#zoom-in');await click('#zoom-in');
  assert($('#canvas-viewport').classList.contains('pan-ready'));
  const history=JSON.stringify(saved().history);
@@ -57,9 +57,10 @@ await check('Cancelled panning restores its start, and dragging is clamped at th
  drag($('#preview-svg'),1e6,-1e6);
  const pos=position();assert(pos.x>0&&pos.x<1000&&pos.y<0&&pos.y>-1000,JSON.stringify(pos));
 });
-await check('Fit recenters and disables panning at 100%',async()=>{
- await click('#zoom-fit');assert(position().x===0&&position().y===0&&$('#pan-preview').disabled);
- drag($('#preview-svg'),40,30);assert(position().x===0&&position().y===0);
+await check('Fit recenters and keeps panning available at 100%',async()=>{
+ await click('#zoom-fit');assert(position().x===0&&position().y===0&&!$('#pan-preview').disabled);
+ drag($('#preview-svg'),40,30);assert(position().x===40&&position().y===30);
+ await click('#zoom-fit');
 });
 await check('Pan tool overrides outline selection and suppresses the following click',async()=>{
  for(let i=0;i<4;i++) await click('#zoom-in');

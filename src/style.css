@@ -1,5 +1,19 @@
 @import url('./workspace.css');
 
+select[hidden]{display:none!important}
+.custom-select-trigger{display:block;text-align:left;min-height:38px;border:1px solid #cfc7d6;border-radius:6px;background:white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='m1 1 5 5 5-5' fill='none' stroke='%23705c7f' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 12px center;padding:8px 34px 8px 10px;width:100%;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.custom-select-trigger:hover:not(:disabled),.custom-select-trigger[aria-expanded=true]{border-color:#9270ae;background-color:#fbf8fd}
+.custom-select-trigger:disabled{background-color:#f3f1f5;color:#77717d;cursor:default}
+.custom-select-options{position:fixed;inset:auto;margin:0;box-sizing:border-box;padding:5px;border:1px solid #cfc7d6;border-radius:8px;background:white;color:#302a35;box-shadow:0 8px 28px #30203926;overflow:auto;overscroll-behavior:contain;font-size:13px}
+.custom-select-options [role=option]{padding:9px 28px 9px 10px;border-radius:4px;cursor:pointer;position:relative;overflow-wrap:anywhere}
+.custom-select-options [aria-selected=true]::after{content:'✓';position:absolute;right:9px;color:var(--purple)}
+.custom-select-options .active{background:var(--purple-soft);color:var(--purple)}
+.custom-select-options [aria-disabled=true]{opacity:.5;cursor:default}
+.layer-treatment>.custom-select-trigger,.region-scope-picker>.custom-select-trigger{flex:1;width:0}
+.tab-pickers .custom-select-trigger,.layer-treatment .custom-select-trigger,.layer-filters .custom-select-trigger{font-size:12px}
+.dropdown-preview{pointer-events:none}
+.dropdown-preview path{fill:#ff2da6;fill-opacity:.18;stroke:#ff2da6;stroke-width:3;stroke-linejoin:round}
+
 @font-face{font-family:'DM Sans';font-style:normal;font-weight:400;font-display:swap;src:url('/vendor/fonts/dm-sans-400.ttf') format('truetype')}
 
 @font-face{font-family:'DM Sans';font-style:normal;font-weight:500;font-display:swap;src:url('/vendor/fonts/dm-sans-500.ttf') format('truetype')}
