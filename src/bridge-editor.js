@@ -1,5 +1,7 @@
-import { scaleBridges, unscaleBridge, pointInMaterial, bridgeKey } from './material-geometry.js';
+import { scaleBridges, unscaleBridge, pointInMaterial, bridgeKey, bridgePolygon } from './material-geometry.js';
 import { pathData } from './geometry.js';
+
+const widthControl = (id, label, min, value = '') => `<div class="control"><div class="control-label"><label for="${id}">${label}</label><div class="number-unit"><input id="${id}" type="number" min="${min}" max="15" step="0.1" value="${value}" /><span>mm</span></div></div><input id="${id}-range" type="range" min="${min}" max="15" step="0.1" value="${value || min}" aria-label="${id === 'selected-bridge-width' ? 'Selected Bridge Width' : label} Slider" /></div>`;
 
 export const bridgePanel = `
 <section class="bridge-inspector editing-panel" id="bridge-inspector" aria-label="Material Bridges" hidden>
@@ -7,11 +9,11 @@ export const bridgePanel = `
   <p class="panel-description">Bridges connect separate pieces of retained material to the sheet.</p>
   <div class="region-actions"><button id="generate-bridges" class="primary-button">Generate Bridges</button><button id="add-bridge" class="small-button" aria-pressed="false">Add Bridge</button></div>
   <p id="bridge-hint" class="edit-hint" role="status"></p>
-  <div class="bridge-fields"><label>Bridge Width (mm)<input id="bridge-width" type="number" min="0.5" max="15" step="0.1" value="3" /></label><label class="check-label"><input id="bridge-match-features" type="checkbox" checked /><span>Match Artwork Features</span></label></div>
+  <div class="bridge-fields">${widthControl('bridge-width', 'Bridge Width', 0.5, 3)}<label class="check-label"><input id="bridge-match-features" type="checkbox" checked /><span>Match Artwork Features</span></label></div>
   <p class="control-hint">Automatic bridges follow nearby features and match their widths when possible. Custom bridges are preserved.</p>
   <label class="field">Bridge<select id="bridge-picker" aria-label="Select Material Bridge"></select></label>
-  <div id="bridge-selection" hidden><h3 id="bridge-selection-title">Selected Bridge</h3><div class="bridge-fields"><label>Bridge Width (mm)<input id="selected-bridge-width" type="number" min="0.5" max="15" step="0.1" /></label><label class="check-label"><input id="selected-bridge-curved" type="checkbox" disabled /><span>Curved Bridge</span></label></div><p id="bridge-curve-hint" class="control-hint" hidden>Drag the bend handle to follow the artwork.</p><div class="region-actions"><button id="snap-bridge" class="small-button" disabled>Snap to Artwork</button><button id="remove-bridge" class="small-button danger" disabled>Remove Bridge</button></div></div>
-  <details class="panel-details"><summary>Advanced</summary><div class="bridge-fields"><label>Minimum Material Width (mm)<input id="minimum-material-width" type="number" min="0.1" max="15" step="0.1" value="0.5" /></label><label class="check-label"><input id="bridge-reinforcement" type="checkbox" /><span>Add Reinforcement</span></label></div><button id="clear-bridge-exclusions" class="small-button" disabled>Allow Removed Connections</button><p class="control-hint">Allow previously removed automatic connections to be generated again.</p></details>
+  <div id="bridge-selection" hidden><h3 id="bridge-selection-title">Selected Bridge</h3><div class="bridge-fields">${widthControl('selected-bridge-width', 'Bridge Width', 0.5)}<label class="check-label"><input id="selected-bridge-curved" type="checkbox" disabled /><span>Curved Bridge</span></label></div><p id="bridge-curve-hint" class="control-hint" hidden>Drag the bend handle to follow the artwork.</p><div class="region-actions"><button id="snap-bridge" class="small-button" disabled>Snap to Artwork</button><button id="remove-bridge" class="small-button danger" disabled>Remove Bridge</button></div></div>
+  <details class="panel-details"><summary>Advanced</summary><div class="bridge-fields">${widthControl('minimum-material-width', 'Minimum Material Width', 0.1, 0.5)}<label class="check-label"><input id="bridge-reinforcement" type="checkbox" /><span>Add Reinforcement</span></label></div><button id="clear-bridge-exclusions" class="small-button" disabled>Allow Removed Connections</button><p class="control-hint">Allow previously removed automatic connections to be generated again.</p></details>
 </section>`;
 
 export function createBridgeEditor({ state, render, mutate, snapshot, restore, record, commit, save, notify, svgPoint, screenUnit, runTask }) {
@@ -28,6 +30,35 @@ export function createBridgeEditor({ state, render, mutate, snapshot, restore, r
   }
   const toArtwork = p => ({ x: (p.x - state.scaled.padding) / state.artworkWidth, y: (p.y - state.scaled.padding) / state.artworkWidth });
   const scaled = () => scaleBridges(state.regionBridges, state.artworkWidth, state.scaled.padding);
+  const centerline = b => `M${b.a.x} ${b.a.y}${b.control ? `Q${b.control.x} ${b.control.y} ${b.b.x} ${b.b.y}` : `L${b.b.x} ${b.b.y}`}`;
+  function refreshOverlay() {
+    const previous = svg.querySelector('.material-bridge-overlays');
+    if (previous) previous.outerHTML = overlay();
+  }
+  function drawGesture() {
+    if (!gesture) return;
+    gesture.frame = null;
+    if (gesture.kind === 'box') return refreshOverlay();
+    const bridge = state.regionBridges.find(b => b.id === gesture.id);
+    if (!bridge) return;
+    const b = scaleBridges([bridge], state.artworkWidth, state.scaled.padding)[0];
+    const group = svg.querySelector(`[data-material-bridge="${b.id}"]`)?.closest('.region-bridge');
+    if (!group) return;
+    // Only the small bridge polygon changes. Leave cut paths, material analysis,
+    // inspector DOM and the captured handle intact until release.
+    group.style.setProperty('--bridge-color', '#258477');
+    group.querySelector('.bridge-highlight').setAttribute('d', pathData(bridgePolygon(b)));
+    group.querySelector('.bridge-hit').setAttribute('d', centerline(b));
+    group.querySelector('.bridge-control-guide')?.setAttribute('d', `M${b.a.x} ${b.a.y}L${b.control?.x} ${b.control?.y}L${b.b.x} ${b.b.y}`);
+    for (const handle of group.querySelectorAll('[data-bridge-end]')) {
+      const point = b[handle.dataset.bridgeEnd];
+      handle.setAttribute('cx', point.x);
+      handle.setAttribute('cy', point.y);
+    }
+  }
+  function scheduleGesture() {
+    if (gesture.frame == null) gesture.frame = requestAnimationFrame(drawGesture);
+  }
   function options() {
     return { ...state, padding: state.scaled.padding, sheet: state.scaled, regionBridges: scaled() };
   }
@@ -43,6 +74,7 @@ export function createBridgeEditor({ state, render, mutate, snapshot, restore, r
   function finishGesture(cancelled = false) {
     if (!gesture) return;
     const finished = gesture; gesture = null;
+    if (finished.frame != null) cancelAnimationFrame(finished.frame);
     if (finished.kind === 'box') {
       if (cancelled) select(finished.previous, finished.anchor);
       render();
@@ -63,7 +95,7 @@ export function createBridgeEditor({ state, render, mutate, snapshot, restore, r
     $('#edit-bridges').setAttribute('aria-pressed', state.editingBridges);
     $('#edit-bridges').setAttribute('aria-expanded', state.editingBridges);
     $('#bridge-support').textContent = state.result.components ? state.result.unsupported.length ? `${state.result.unsupported.length} Unsupported` : state.result.narrowConnections || state.result.regionBridges?.some(bridge => !bridge.valid) || state.result.components.filter(component => component.sheetConnected).length > 1 ? 'Material Needs Attention' : 'All Material Connected' : 'Not Checked';
-    $('#bridge-hint').textContent = adding ? (start ? 'Choose the second anchor in retained material.' : 'Choose the first anchor in retained material.') : bridges.length ? `${bridges.length} selected. Drag handles to adjust a bridge; Shift adds to the selection.` : 'Select a bridge to adjust it, or drag a rectangle to select several.';
+    $('#bridge-hint').textContent = adding ? (start ? 'Choose the second anchor in retained material.' : 'Choose the first anchor in retained material.') : bridges.length ? `${bridges.length} selected. Drag a bridge to move it or its handles to adjust it; Shift adds to the selection.` : 'Select or drag a bridge, or drag a rectangle to select several.';
     $('#generate-bridges').textContent = state.regionBridges.some(bridge => bridge.automatic) ? 'Regenerate Bridges' : 'Generate Bridges';
     $('#bridge-selection').hidden = !bridges.length;
     $('#bridge-selection-title').textContent = bridges.length > 1 ? `${bridges.length} Bridges Selected` : 'Selected Bridge';
@@ -81,6 +113,14 @@ export function createBridgeEditor({ state, render, mutate, snapshot, restore, r
     const mixedWidth = bridges.some(b => b.width !== bridges[0].width);
     $('#selected-bridge-width').value = mixedWidth ? '' : selected()?.width ?? '';
     $('#selected-bridge-width').placeholder = mixedWidth ? 'Mixed' : '';
+    for (const id of ['bridge-width', 'minimum-material-width', 'selected-bridge-width']) {
+      const input = $(`#${id}`), slider = $(`#${id}-range`);
+      slider.disabled = input.disabled;
+      slider.value = input.value || selected()?.width || input.min;
+      slider.style.setProperty('--range', `${(slider.value - slider.min) / (slider.max - slider.min) * 100}%`);
+      if (id === 'selected-bridge-width' && mixedWidth) slider.setAttribute('aria-valuetext', 'Mixed widths');
+      else slider.removeAttribute('aria-valuetext');
+    }
     $('#snap-bridge').disabled = bridges.length !== 1 || bridges[0].automatic;
     $('#snap-bridge').title = $('#snap-bridge').disabled ? 'Select one custom bridge to snap it to a nearby feature.' : 'Align with a nearby feature and match its width.';
     $('#remove-bridge').disabled = !selected();
@@ -158,6 +198,16 @@ export function createBridgeEditor({ state, render, mutate, snapshot, restore, r
     if (!selected() || e.target.value === '' || !Number.isFinite(value)) return update();
     mutate(() => { for (const bridge of selection()) { bridge.width = Math.max(0.5, Math.min(15, value)); bridge.automatic = false; } });
   });
+  for (const id of ['bridge-width', 'minimum-material-width', 'selected-bridge-width']) {
+    const input = $(`#${id}`), slider = $(`#${id}-range`);
+    slider.addEventListener('input', () => {
+      input.value = slider.value;
+      slider.removeAttribute('aria-valuetext');
+      slider.style.setProperty('--range', `${(slider.value - slider.min) / (slider.max - slider.min) * 100}%`);
+    });
+    // Commit on release so geometry analysis cannot interrupt a slider drag.
+    slider.addEventListener('change', () => input.dispatchEvent(new Event('change', { bubbles: true })));
+  }
   svg.addEventListener('pointerdown', e => {
     if (!state.editingBridges || e.button !== 0 || e.defaultPrevented || gesture) return;
     const point = svgPoint(e); if (!point) return;
@@ -178,12 +228,17 @@ export function createBridgeEditor({ state, render, mutate, snapshot, restore, r
     else if (!e.shiftKey) select([]);
     if (target?.dataset.bridgeEnd) {
       gesture = { before: snapshot(), pointerId: e.pointerId, end: target.dataset.bridgeEnd, id: state.selectedRegionBridge };
+    } else if (target) {
+      gesture = { kind: 'move', before: snapshot(), pointerId: e.pointerId, id,
+        start: point, original: structuredClone(selected()), x: e.clientX, y: e.clientY, moved: false };
     } else if (!target) {
       gesture = { kind: 'box', pointerId: e.pointerId, start: point, point, x: e.clientX, y: e.clientY, moved: false, previous, anchor, additive: e.shiftKey };
     }
     if (gesture && e.isTrusted) svg.setPointerCapture(e.pointerId);
     e.preventDefault();
-    render();
+    // Selection changes need only the editor overlays and inspector, not a
+    // reconstruction of every cut path in the artwork.
+    update(); refreshOverlay();
   });
   svg.addEventListener('pointermove', e => {
     if (!gesture || gesture.pointerId !== e.pointerId) return;
@@ -200,11 +255,26 @@ export function createBridgeEditor({ state, render, mutate, snapshot, restore, r
         return x >= minX && x <= maxX && y >= minY && y <= maxY;
       }).map(b => b.id);
       select([...(gesture.additive ? gesture.previous : []), ...inside]);
-      render(); return;
+      scheduleGesture(); return;
     }
     const bridge = selected(); if (!bridge) return finishGesture(true);
-    bridge[gesture.end] = toArtwork({ x: Math.max(0, Math.min(state.scaled.width, p.x)), y: Math.max(0, Math.min(state.scaled.height, p.y)) });
-    bridge.automatic = false; render();
+    if (gesture.kind === 'move') {
+      if (!gesture.moved && Math.hypot(e.clientX - gesture.x, e.clientY - gesture.y) < 3) return;
+      gesture.moved = true;
+      const original = gesture.original, padding = state.scaled.padding, width = state.artworkWidth;
+      // Clamp the translation as a whole so neither anchor leaves the sheet
+      // and the bridge's length and curve remain unchanged.
+      const dx = Math.max(-padding / width - Math.min(original.a.x, original.b.x),
+        Math.min((state.scaled.width - padding) / width - Math.max(original.a.x, original.b.x), (p.x - gesture.start.x) / width));
+      const dy = Math.max(-padding / width - Math.min(original.a.y, original.b.y),
+        Math.min((state.scaled.height - padding) / width - Math.max(original.a.y, original.b.y), (p.y - gesture.start.y) / width));
+      for (const end of ['a', 'b', ...(original.control ? ['control'] : [])]) {
+        bridge[end] = { x: original[end].x + dx, y: original[end].y + dy };
+      }
+    } else {
+      bridge[gesture.end] = toArtwork({ x: Math.max(0, Math.min(state.scaled.width, p.x)), y: Math.max(0, Math.min(state.scaled.height, p.y)) });
+    }
+    bridge.automatic = false; scheduleGesture();
   });
   svg.addEventListener('pointerup', e => { if (gesture?.pointerId === e.pointerId) finishGesture(); });
   svg.addEventListener('pointercancel', e => { if (gesture?.pointerId === e.pointerId) finishGesture(true); });

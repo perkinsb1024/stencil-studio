@@ -117,6 +117,33 @@ test('bridges override crossing channels, invalid anchors warn, and hidden regio
   assert.equal(cut(hidden, 50, 50), true);
 });
 
+test('bridge end footprints attach even when their centers sit inside the cut', () => {
+  for (const control of [undefined, { x: 50, y: 25 }]) {
+    const bridge = { id: 'cap-overlap', a: { x: 50, y: 39 }, b: { x: 50, y: 11 }, width: 3, ...(control ? { control } : {}) };
+    const result = composeMaterial([outer, island], [], { ...options, regionBridges: [bridge] });
+    assert.equal(pointInMaterial(bridge.a, result.baseMaterial), false);
+    assert.equal(pointInMaterial(bridge.b, result.baseMaterial), false);
+    assert.equal(result.regionBridges[0].valid, true);
+    assert.equal(result.unsupported.length, 0);
+    assert.ok(!result.warnings.some(w => w.includes('invalid anchor')));
+  }
+});
+
+test('bridge caps must overlap material with positive area at both ends', () => {
+  for (const y of [11.5, 12]) {
+    const bridge = { id: 'detached-end', a: { x: 50, y: 39 }, b: { x: 50, y }, width: 3 };
+    const result = composeMaterial([outer, island], [], { ...options, regionBridges: [bridge] });
+    assert.equal(result.regionBridges[0].valid, false);
+    if (y > 11.5) assert.equal(result.unsupported.length, 1);
+  }
+  const floating = { id: 'floating', a: { x: 20, y: 20 }, b: { x: 20, y: 30 }, width: 3 };
+  const noCut = { id: 'no-cut', a: { x: 2, y: 2 }, b: { x: 2, y: 8 }, width: 3 };
+  for (const bridge of [floating, noCut]) {
+    const result = composeMaterial([outer, island], [], { ...options, regionBridges: [bridge] });
+    assert.equal(result.regionBridges[0].valid, false);
+  }
+});
+
 test('bridge coordinates scale with artwork while physical width remains fixed', () => {
   const bridge = { id: 'bridge-scale', a: { x: 0.5, y: 0.5 }, b: { x: 0.5, y: -0.05 }, width: 3, automatic: false };
   const first = scaleBridges([bridge], 100, 8)[0], second = scaleBridges([bridge], 200, 12)[0];

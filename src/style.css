@@ -25,11 +25,16 @@
 .is-panning .sheet-wrap{transition:none}
 .bridge-highlight{fill:var(--bridge-color);fill-opacity:.28;stroke:var(--bridge-color);stroke-width:.25;pointer-events:none}
 .region-bridge.selected .bridge-highlight{fill-opacity:.5;stroke:#ff2da6;stroke-width:.45}
-.bridge-hit{fill:none;stroke:transparent;stroke-width:16;pointer-events:stroke;cursor:pointer}
+.bridge-hit{fill:none;stroke:transparent;stroke-width:16;pointer-events:stroke;cursor:grab}
+.bridge-hit:active{cursor:grabbing}
 .bridge-control-guide{fill:none;stroke:#258477;stroke-width:1;stroke-dasharray:4 3;opacity:.6}
 .region-bridge circle{fill:white;stroke:var(--bridge-color);stroke-width:2;cursor:grab}
 .region-bridge [tabindex]:focus{outline:none}
 .region-bridge:has(:focus-visible) .bridge-highlight{stroke:#ff2da6;stroke-width:.45;fill-opacity:.5}
+/* Highlight the actual drag target, rather than its entire parent group. */
+.region-bridge:has(>.bridge-hit:hover) .bridge-highlight{fill-opacity:.75;stroke:#ff2da6;stroke-width:.6}
+.region-bridge circle:hover,.region-bridge circle:focus-visible{fill:#ff2da6;stroke:#502c6c;stroke-width:3}
+.region-bridge circle:active{cursor:grabbing}
 .unsupported-material{fill:#e59338;fill-opacity:.18;stroke:#c66e28;stroke-width:.35;stroke-dasharray:1 1}
 .editing-bridges{touch-action:none}
 .adding-bridge,.adding-bridge *{cursor:crosshair}
@@ -45,6 +50,8 @@
 .editing-tabs .tab-marker{cursor:grab;outline:none}
 .editing-tabs .tab-marker:active{cursor:grabbing}
 .editing-tabs .tab-marker:focus-visible>path{stroke:#502c6c;opacity:1}
+.editing-tabs:not(.adding-tab) .tab-marker:hover>path{stroke:#ff2da6;opacity:1}
+.editing-tabs:not(.adding-tab) .tab-marker:hover>circle:not([fill="transparent"]),.editing-tabs:not(.adding-tab) .tab-marker:hover>rect{stroke:#ff2da6;stroke-width:3}
 .outline-hit-targets>path{cursor:pointer;pointer-events:stroke}
 .adding-tab,.adding-tab .tab-marker,.adding-tab .outline-hit-targets>path{cursor:crosshair}
 #tab-selection-box,#bridge-selection-box{fill:#258477;fill-opacity:0.12;stroke:#258477;stroke-width:1;stroke-dasharray:4 3;vector-effect:non-scaling-stroke;pointer-events:none}
@@ -54,6 +61,8 @@
 .width-region circle{fill:#fffef9;stroke:#117569;stroke-width:2;cursor:grab}
 .width-region circle:active{cursor:grabbing}
 .width-region [tabindex]:focus-visible{outline:none;stroke:#ff2da6;stroke-width:3}
+.width-region>path:hover{fill-opacity:.24;stroke:#ff2da6;stroke-width:3}
+.width-region circle:hover,.width-region circle:focus-visible{fill:#ff2da6;stroke:#502c6c;stroke-width:3}
 .region-draft path{fill:#218c83;fill-opacity:.1;stroke:#258477;stroke-width:1.5;stroke-dasharray:5 3}
 .region-draft circle{fill:#fffef9;stroke:#258477;stroke-width:2}
 .drawing-region,.drawing-region .width-region path{cursor:crosshair}

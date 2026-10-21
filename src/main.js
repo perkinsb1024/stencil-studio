@@ -68,9 +68,10 @@ const busy = createBusyTask({
   onError(message) { rollbackGeneration(); notify(message, 'error'); },
 });
 function geometrySettings() {
+  // Bridge generation preferences do not change the existing stencil geometry.
+  // Generate Bridges reads those preferences directly from state.
   const keys = [...Object.keys(defaults), 'tabLayouts', 'hiddenContours', 'cutawayContours', 'regions',
-    'materialTreatments', 'materialOrder', 'regionBridges', 'bridgeExclusions', 'bridgeWidth',
-    'minimumMaterialWidth', 'bridgeReinforcement', 'bridgeMatchFeatures', 'areaOverrides'];
+    'materialTreatments', 'materialOrder', 'regionBridges', 'minimumMaterialWidth', 'areaOverrides'];
   return { ...Object.fromEntries(keys.map(key => [key, state[key]])), analyzeMaterial: state.editingBridges || state.workflowStep === 3 };
 }
 function geometryGestureActive() { return Boolean(drag || regionEditor.dragging || bridgeEditor.dragging); }

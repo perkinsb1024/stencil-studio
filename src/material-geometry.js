@@ -81,6 +81,24 @@ export function bridgeCenterline(bridge) {
   });
 }
 
+function bridgeEndOverlapsMaterial(bridge, end, material, strip) {
+  const line = bridgeCenterline(bridge);
+  const p = end === 'a' ? line[0] : line.at(-1);
+  const neighbor = end === 'a' ? line[1] : line.at(-2);
+  const length = Math.hypot(neighbor.x - p.x, neighbor.y - p.y);
+  if (!length) return false;
+  const dx = (neighbor.x - p.x) / length * bridge.width / 2;
+  const dy = (neighbor.y - p.y) / length * bridge.width / 2;
+  // Include the square cap and the full strip width, not just its center point.
+  const footprint = integer([[
+    { x: p.x - dx - dy, y: p.y - dy + dx },
+    { x: p.x - dx + dy, y: p.y - dy - dx },
+    { x: p.x + dx + dy, y: p.y + dy - dx },
+    { x: p.x + dx - dy, y: p.y + dy + dx },
+  ]]);
+  return area(intersection(material, intersection(strip, footprint))) > 0.00001;
+}
+
 export function composeMaterial(contours, channelCuts, options) {
   const { sheet } = options, hidden = new Set(options.hiddenContours ?? []);
   const sheetPaths = integer([[{ x: 0, y: 0 }, { x: sheet.width, y: 0 }, { x: sheet.width, y: sheet.height }, { x: 0, y: sheet.height }]]);
@@ -117,8 +135,7 @@ export function composeMaterial(contours, channelCuts, options) {
   const bridgeResults = bridges.map((bridge, i) => {
     // Validate against all OTHER bridges; a strip cannot validate its own anchors.
     const otherMaterial = difference(sheetPaths, difference(baseCuts, union(strips.filter((_, j) => j !== i).flat())));
-    const retainedPaths = decimal(otherMaterial);
-    const valid = bridgePolygon(bridge).length > 0 && pointInMaterial(bridge.a, retainedPaths) && pointInMaterial(bridge.b, retainedPaths) && area(intersection(baseCuts, strips[i])) > 0.00001;
+    const valid = bridgePolygon(bridge).length > 0 && bridgeEndOverlapsMaterial(bridge, 'a', otherMaterial, strips[i]) && bridgeEndOverlapsMaterial(bridge, 'b', otherMaterial, strips[i]) && area(intersection(baseCuts, strips[i])) > 0.00001;
     if (!valid) warnings.push(`Bridge ${i + 1} has an invalid anchor or does not cross a cut. Move its endpoints or regenerate automatic bridges.`);
     return { ...bridge, valid, polygon: bridgePolygon(bridge) };
   });
