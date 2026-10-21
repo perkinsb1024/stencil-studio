@@ -46,18 +46,18 @@ test('only exact redundant filled boundaries are automatically hidden; interveni
   assert.equal(nested['shape-1'].confidence, 'medium');
 });
 
-test('white overlay crossing the opening becomes Keep, while a detached island requires review', () => {
+test('white overlays become Keep automatically, with detached islands reported separately', () => {
   const connected = suggest([{}, { points: rect(30, 0, 10, 100), fill: white }]);
   assert.equal(connected['shape-0'].mode, 'cut'); assert.equal(connected['shape-0'].confidence, 'high');
   assert.equal(connected['shape-1'].mode, 'keep'); assert.equal(connected['shape-1'].confidence, 'high');
   const art = artwork([{}, { points: rect(30, 30, 20, 20), fill: white }]);
   const s = suggestAreas(art, settings);
   assert.equal(s.byRegion['shape-1'].mode, 'keep');
-  assert.equal(s.byRegion['shape-0'].confidence, 'medium');
+  assert.equal(s.byRegion['shape-0'].confidence, 'high');
   assert.match(s.warnings.join(' '), /unsupported/);
   const target = {};
   applyAreaSuggestions(target, art, s);
-  assert.equal(target.materialTreatments['shape-0'], 'outline'); assert.equal(target.materialTreatments['shape-1'], 'outline');
+  assert.equal(target.materialTreatments['shape-0'], 'cut'); assert.equal(target.materialTreatments['shape-1'], 'keep');
   const bridged = suggestAreas(art, { ...settings, regionBridges: [{ id: 'bridge-test', a: { x: 48, y: 48 }, b: { x: 48, y: 13 }, width: 3, automatic: false }] });
   assert.equal(bridged.byRegion['shape-0'].confidence, 'high');
 });
@@ -65,7 +65,7 @@ test('white overlay crossing the opening becomes Keep, while a detached island r
 test('compound holes use their fill rule and require support, while nonzero overlaps remain a single cut', () => {
   const rings = [rect(10, 10, 80, 80), rect(30, 30, 20, 20)];
   const even = suggest([{ rings, fillRule: 'evenodd' }])['shape-0'];
-  assert.equal(even.mode, 'cut'); assert.equal(even.area, 6000); assert.equal(even.confidence, 'medium');
+  assert.equal(even.mode, 'cut'); assert.equal(even.area, 6000); assert.equal(even.confidence, 'high');
   const nonzero = suggest([{ rings }])['shape-0'];
   assert.equal(nonzero.area, 6400); assert.equal(nonzero.confidence, 'high');
 });
@@ -87,11 +87,26 @@ test('reapplication protects manual visibility, treatment, custom tabs, order an
   for (const key of ['tabLayouts', 'materialOrder', 'regionBridges']) assert.deepEqual(target[key], before[key]);
 });
 
-test('reapplication defers cuts that erase Keep after a layer reorder or consume a manual Outline detail', () => {
+test('reapplication flags erased Keep after reordering and preserves manual Outline details', () => {
   const art = artwork([{}, { points: rect(30, 0, 10, 100), fill: white }]);
   const reordered = suggestAreas(art, { ...settings, materialOrder: ['shape-1', 'shape-0'] });
-  assert.equal(reordered.byRegion['shape-0'].confidence, 'medium');
+  assert.equal(reordered.byRegion['shape-0'].confidence, 'high');
+  const target = {}; applyAreaSuggestions(target, art, reordered);
+  assert.equal(target.materialTreatments['shape-0'], 'cut');
+  assert.equal(target.materialTreatments['shape-1'], 'keep');
   assert.match(reordered.warnings.join(' '), /erase retained details/);
   const manual = suggestAreas(art, { ...settings, materialTreatments: { 'shape-1': 'outline' }, areaOverrides: { 'shape-1': true } });
   assert.equal(manual.byRegion['shape-0'].mode, 'outline');
+});
+
+test('narrow material types apply automatically, while ambiguous types and uncertain hiding stay Outline', () => {
+  const art = artwork([{ points: rect(1, 10, 0.4, 50) }, { opacity: 0.5 }, { points: rect(30, 30, 20, 20) }, {}]);
+  const suggestions = suggestAreas(art, settings), target = {};
+  applyAreaSuggestions(target, art, suggestions);
+  assert.equal(target.materialTreatments['shape-0'], 'cut');
+  assert.equal(target.materialTreatments['shape-1'], 'outline');
+  assert.equal(suggestions.byRegion['shape-2'].mode, 'hidden');
+  assert.equal(suggestions.byRegion['shape-2'].confidence, 'medium');
+  assert.equal(target.materialTreatments['shape-2'], 'outline');
+  assert.ok(!target.hiddenContours.includes('outline-2'));
 });

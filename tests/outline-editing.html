@@ -33,22 +33,19 @@ const outline = id => `[data-visibility-outline="outline-${id}"]`;
 const selected = () => [...d.querySelectorAll('.outline-select[aria-pressed="true"]')];
 function flush() { w.dispatchEvent(new w.Event('stencil:before-reload')); }
 function caretPointsTo(panelId, buttonId) {
-  const panel = $(panelId), button = $(buttonId).getBoundingClientRect();
-  const style = w.getComputedStyle(panel, '::before');
-  const caretX = panel.getBoundingClientRect().left + parseFloat(w.getComputedStyle(panel).borderLeftWidth) + parseFloat(style.left) + parseFloat(style.width) / 2;
-  assert(Math.abs(caretX - (button.left + button.width / 2)) <= 3, `Caret is not aligned to ${buttonId} at ${w.innerWidth}px: ${caretX} vs ${button.left + button.width / 2}`);
-  assert(style.content !== 'none', 'Missing caret');
-  assert(button.bottom <= panel.getBoundingClientRect().top, 'Mode button is below its panel');
+  assert($(buttonId).getAttribute('aria-pressed') === 'true', 'Tool is not active');
+  assert($(panelId).closest('.inspector'), 'Tool controls must be in the inspector');
 }
+
 await load(() => { frame.src = '/?workspace=outline-editing-tests&live-reload=off'; });
 let originalCuts, dimensions, customCuts, customLayout;
-await check('Outline mode has thumbnails, visible checkboxes, selection targets and an aligned caret', async () => {
+await check('Outline mode has thumbnails, visible checkboxes, selection targets and an active tool', async () => {
   originalCuts = cuts(); dimensions = [$('#dimension-width').textContent, $('#dimension-height').textContent];
   const size = $('#preview-svg').getBoundingClientRect();
   await click('#edit-outlines');
   assert(!$('#outline-inspector').hidden && $('#tab-inspector').hidden);
   assert($('#edit-outlines').getAttribute('aria-pressed') === 'true');
-  assert(d.querySelectorAll('.outline-row').length === 2 && d.querySelectorAll('.outline-select svg').length === 2);
+  assert(d.querySelectorAll('.layer-card').length === 2 && d.querySelectorAll('.outline-select svg').length === 2);
   assert($('#visible-outline-0').checked && $('#visible-outline-1').checked);
   assert($(outline(0)).getAttribute('tabindex') === '0');
   assert(markers().length === 0 && cuts() === originalCuts);
@@ -60,9 +57,42 @@ await check('Canvas and list selections synchronize; Shift toggles multiple outl
   await click('#select-outline-1', true); assert(selected().length === 2);
   await click(outline(0), true); assert(selected().length === 1 && $('#select-outline-1').getAttribute('aria-pressed') === 'true');
 });
+await check('Rectangle selection changes several layer types with a single undo', async () => {
+  const svg = $('#preview-svg'), bounds = svg.getBoundingClientRect();
+  const pointer = (type, x, y, target = svg, extra = {}) => target.dispatchEvent(new w.PointerEvent(type, { bubbles: true, pointerId: 42, button: 0, clientX: x, clientY: y, ...extra }));
+  pointer('pointerdown', bounds.left + 1, bounds.top + 1);
+  pointer('pointermove', bounds.right - 1, bounds.bottom - 1);
+  assert($('#tab-selection-box'), 'Selection rectangle missing');
+  pointer('pointerup', bounds.right - 1, bounds.bottom - 1);
+  svg.dispatchEvent(new w.MouseEvent('click', { bubbles: true, detail: 1 }));
+  assert(selected().length === 2, 'Post-drag click cleared selection');
+  assert(!$('#selected-layer-treatment').closest('[hidden]'));
+  await change('#selected-layer-treatment', 'keep');
+  assert([...d.querySelectorAll('[data-treatment-outline]')].every(el => el.value === 'keep'));
+  await click('#undo');
+  assert([...d.querySelectorAll('[data-treatment-outline]')].every(el => el.value === 'outline'));
+  await click('#redo');
+  assert([...d.querySelectorAll('[data-treatment-outline]')].every(el => el.value === 'keep'));
+  await click('#undo');
+  await change('#treatment-outline-0', 'cut');
+  await click('#select-outline-1', true);
+  assert($('#selected-layer-treatment').value === '', 'Mixed types not indicated');
+  await click('#undo');
+  await click('#select-outline-1');
+  pointer('pointerdown', bounds.left + 1, bounds.top + 1, svg, { shiftKey: true });
+  pointer('pointermove', bounds.left + 8, bounds.top + 8);
+  pointer('pointerup', bounds.left + 8, bounds.top + 8);
+  assert(selected().length === 1, 'Shift rectangle discarded previous selection');
+  // A cancelled drag restores the prior selection.
+  await click('#select-outline-1');
+  pointer('pointerdown', bounds.left + 1, bounds.top + 1);
+  pointer('pointermove', bounds.right - 1, bounds.bottom - 1);
+  pointer('pointercancel', bounds.right - 1, bounds.bottom - 1);
+  assert(selected().length === 1 && $('#select-outline-1').getAttribute('aria-pressed') === 'true');
+});
 await check('Hiding updates cuts and guides without moving or resizing artwork', async () => {
   await click('#hide-outlines');
-  assert(!$('#visible-outline-1').checked && $('#outline-count').textContent === '1 of 2 visible');
+  assert(!$('#visible-outline-1').checked && $('#outline-count').textContent === '1 of 2 Visible');
   assert($(outline(1)).classList.contains('is-hidden') && cuts() !== originalCuts);
   assert(JSON.stringify(dimensions) === JSON.stringify([$('#dimension-width').textContent, $('#dimension-height').textContent]));
   await click('#show-original'); assert(d.querySelectorAll('.original-outlines path').length === 1);
@@ -76,16 +106,16 @@ await check('Hide/show and bulk actions undo and redo as single steps', async ()
   await click('#keep-only-outlines'); assert(!$('#visible-outline-0').checked && $('#visible-outline-1').checked);
   await click('#undo'); assert(cuts() === originalCuts);
   await click('#select-outline-0'); await click('#select-outline-1', true); await click('#hide-outlines');
-  assert($('#download').disabled && !$('#outlines-empty').hidden && $('#edit-tabs').disabled);
+  assert($('#download').disabled && !$('#outlines-empty').hidden && !$('#edit-tabs').disabled);
   assert(cuts() === '' && d.querySelectorAll('.visibility-outline.is-hidden').length === 2);
   await click('#undo'); assert(cuts() === originalCuts && !$('#download').disabled);
 });
-await check('Tab mode excludes hidden outlines and contains its hint with a caret', async () => {
+await check('Tab mode excludes hidden outlines and contains its hint in the inspector', async () => {
   await click('#select-outline-0'); await click('#hide-outlines'); await click('#edit-tabs');
   assert($('#outline-inspector').hidden && !$('#tab-inspector').hidden);
   assert($('#edit-outlines').getAttribute('aria-pressed') === 'false');
-  assert($('#edit-hint').parentElement === $('#tab-inspector'));
-  assert($('#edit-hint').textContent.includes('Drag a tab along its layer'));
+  assert($('#edit-hint').closest('#tab-inspector'));
+  assert($('#edit-hint').textContent.includes('Drag tabs to move them'));
   assert($('#outline-picker').options.length === 1 && $('#outline-picker').value === 'outline-1');
   assert($('#outline-picker').textContent.includes('Layer 2'), 'Outline numbering changed');
   assert(markers().length === 4 && markers().every(m => m.dataset.outline === 'outline-1'));
@@ -131,8 +161,8 @@ await check('Visibility and outline editing UI persist across reload with undo h
 await check('Settings resets preserve visibility and new artwork starts entirely visible', async () => {
   await change('#artworkWidth', 180); assert(!$('#visible-outline-0').checked);
   await click('#reset'); assert(!$('#visible-outline-0').checked && $('#artworkWidth').value === '150');
-  await click('[data-example="orbit"]');
-  assert($('#outline-count').textContent === '3 of 3 visible' && selected().length === 0);
+  await click('[data-example="orbit"]'); await click('#edit-outlines');
+  assert($('#outline-count').textContent === '3 of 3 Visible' && selected().length === 0);
   assert($('#undo').disabled);
 });
 await check('Keyboard selection and hiding retain focus and can be restored from the list', async () => {
@@ -148,22 +178,22 @@ await check('Keyboard selection and hiding retain focus and can be restored from
   $('#select-outline-2').focus();
   $('#select-outline-2').dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Backspace', bubbles: true }));
   assert($('#download').disabled && d.activeElement.id === 'select-outline-2');
-  await click('#show-all-outlines'); assert($('#outline-count').textContent === '3 of 3 visible');
+  await click('#show-all-outlines'); assert($('#outline-count').textContent === '3 of 3 Visible');
 });
 await check('Compound transformed paths and open outlines remain independently hideable', async () => {
   const source = '<svg xmlns="http://www.w3.org/2000/svg"><g transform="translate(20 30) scale(2)"><path d="M0 0H100V100H0ZM25 25H75V75H25Z"/><path d="M0 120H100"/></g></svg>';
   const transfer = new w.DataTransfer(); transfer.items.add(new w.File([source], 'compound.svg', { type: 'image/svg+xml' }));
   $('#file-input').files = transfer.files; $('#file-input').dispatchEvent(new w.Event('change'));
   for (let i = 0; i < 50 && $('#filename').textContent !== 'compound.svg'; i++) await sleep(20);
-  await click('#use-all-outlines');
-  assert(d.querySelectorAll('.outline-row').length === 3);
+  await click('#use-all-outlines'); await click('#edit-outlines');
+  assert(d.querySelectorAll('[data-visible-outline]').length === 3);
   const before = [$('#dimension-width').textContent, $('#dimension-height').textContent];
   await click('#visible-outline-1'); await click('#visible-outline-2');
-  assert($('#outline-count').textContent === '1 of 3 visible');
+  assert($('#outline-count').textContent === '1 of 2 Visible');
   assert(JSON.stringify(before) === JSON.stringify([$('#dimension-width').textContent, $('#dimension-height').textContent]));
   assert(!$('#notice').textContent.includes('Open paths') || $('#notice').hidden);
 });
-await check('Mobile and tablet panels fit, keep canvas size and point to their active buttons', async () => {
+await check('Mobile and tablet panels fit, keep canvas size and identify their active tools', async () => {
   for (const width of [390, 860]) {
     frame.style.width = `${width}px`;
     // Commit the embedded viewport size before waiting for its resize events.
@@ -175,7 +205,7 @@ await check('Mobile and tablet panels fit, keep canvas size and point to their a
     assert(d.documentElement.scrollWidth <= width, `Overflow at ${width}px`);
     caretPointsTo('#outline-inspector', '#edit-outlines');
     const size = $('#preview-svg').getBoundingClientRect();
-    const row = $('.outline-row').getBoundingClientRect(), panel = $('#outline-inspector').getBoundingClientRect();
+    const row = $('.layer-card').getBoundingClientRect(), panel = $('#outline-inspector').getBoundingClientRect();
     assert(row.right <= panel.right, 'Outline row overflows panel');
     await click('#edit-tabs'); caretPointsTo('#tab-inspector', '#edit-tabs');
     assert($('#edit-hint').getBoundingClientRect().left >= $('#tab-inspector').getBoundingClientRect().left);
@@ -189,7 +219,7 @@ await check('Detailed thumbnails preserve corners next to densely sampled sectio
   const transfer = new w.DataTransfer(); transfer.items.add(new w.File([source], 'detailed.svg', { type: 'image/svg+xml' }));
   $('#file-input').files = transfer.files; $('#file-input').dispatchEvent(new w.Event('change'));
   for (let i = 0; i < 50 && $('#filename').textContent !== 'detailed.svg'; i++) await sleep(20);
-  await click('#use-all-outlines');
+  await click('#use-all-outlines'); await click('#edit-outlines');
   const thumbnail = $('.outline-select svg path');
   assert(thumbnail, 'Thumbnail missing');
   const length = thumbnail.getTotalLength();
@@ -206,7 +236,7 @@ await check('Cut Away treatment removes width and tabs, supports undo, and resto
   await click('#edit-outlines'); await change('#treatment-outline-0', $('#treatment-outline-0').value === 'cut' ? 'outline' : 'cut');
   assert($('#treatment-outline-0').value === 'cut' && cuts() !== channels);
   assert((cuts().match(/Z/g) || []).length === 1, 'Cut-away must have one boundary');
-  assert($('#edit-tabs').disabled && !$('#download').disabled, 'All-cut-away artwork remains downloadable');
+  assert(!$('#edit-tabs').disabled && !$('#download').disabled, 'All-cut-away artwork remains downloadable');
   const cutaway = cuts();
   await click('#undo'); assert($('#treatment-outline-0').value === 'outline' && cuts() === channels);
   await click('#redo'); assert($('#treatment-outline-0').value === 'cut' && cuts() === cutaway);
@@ -246,6 +276,8 @@ await check('Open outlines keep channels, cut-aways stay out of tab editing, and
   const transfer = new w.DataTransfer(); transfer.items.add(new w.File([source], 'cutaway.svg', { type: 'image/svg+xml' }));
   $('#file-input').files = transfer.files; $('#file-input').dispatchEvent(new w.Event('change'));
   for (let i = 0; i < 50 && $('#filename').textContent !== 'cutaway.svg'; i++) await sleep(20);
+  await click('#select-outline-0'); await click('#select-outline-1', true);
+  assert([...$('#selected-layer-treatment').options].filter(o => ['keep', 'cut'].includes(o.value)).every(o => o.disabled), 'Bulk types allow open paths');
   assert($('#treatment-outline-0').value === 'cut' && [...$('#treatment-outline-1').options].filter(o => ['keep', 'cut'].includes(o.value)).every(o => o.disabled));
   await click('#edit-tabs');
   assert($('#outline-picker').options.length === 1 && $('#outline-picker').value === 'outline-1');
@@ -255,9 +287,10 @@ await check('Open outlines keep channels, cut-aways stay out of tab editing, and
   for (const width of [390, 860]) {
     frame.style.width = `${width}px`; frame.getBoundingClientRect(); await sleep(80);
     assert(d.documentElement.scrollWidth <= width, `Overflow at ${width}px`);
-    const row = $('.outline-row').getBoundingClientRect();
-    for (const control of $('.outline-row').querySelectorAll('button, label')) {
+    const row = $('.layer-card').getBoundingClientRect();
+    for (const control of $('.layer-card').querySelectorAll('button, label')) {
       const bounds = control.getBoundingClientRect();
+      if (!bounds.width && !bounds.height) continue; // Closed reorder menus have no rendered bounds.
       assert(bounds.left >= row.left && bounds.right <= row.right + 1, `Control overflows outline row at ${width}px`);
     }
   }

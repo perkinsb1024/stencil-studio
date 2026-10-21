@@ -6,14 +6,13 @@ export function createSimplifyEditor({ state, commit, apply, download }) {
   document.body.insertAdjacentHTML('beforeend', `
     <dialog id="simplify-dialog" class="simplify-dialog" aria-labelledby="simplify-title" aria-describedby="simplify-description">
       <button id="close-simplify" class="icon-button dialog-close" aria-label="Close simplification">✕</button>
-      <div class="eyebrow">PREPARE YOUR ARTWORK</div>
       <h2 id="simplify-title">Simplify SVG</h2>
       <p id="simplify-description">Smooth tiny details and separate fragile connections before making your stencil.</p>
       <div class="simplify-layout">
         <div class="simplify-preview-column">
           <div class="simplify-preview-options">
-            <label class="check-label"><input type="checkbox" id="simplify-original" checked><span>Original layer</span></label>
-            <label class="check-label"><input type="checkbox" id="simplify-nodes"><span>Show nodes</span></label>
+            <label class="check-label"><input type="checkbox" id="simplify-original" checked><span>Show Original SVG</span></label>
+            <label class="check-label"><input type="checkbox" id="simplify-nodes"><span>Show Nodes</span></label>
             <div class="simplify-zoom"><button id="simplify-zoom-out" class="small-button" aria-label="Zoom simplification out">−</button><output id="simplify-zoom-label">100%</output><button id="simplify-zoom-in" class="small-button" aria-label="Zoom simplification in">+</button><button id="simplify-fit" class="small-button">Fit</button></div>
           </div>
           <div class="simplify-preview-frame">
@@ -28,16 +27,16 @@ export function createSimplifyEditor({ state, commit, apply, download }) {
         <div class="simplify-controls">
           <p class="simplify-scale" id="simplify-scale"></p>
           ${[
-            ['smooth', 'Smooth small details', 5, 0.05, 'Radius that rounds corners and removes small notches and protrusions. May close tiny holes.'],
-            ['breakWidth', 'Break narrow connections', 10, 0.05, 'Separate necks narrower than this width. Thin slivers and small islands may disappear.'],
-            ['tolerance', 'Reduce nodes', 2, 0.01, 'Maximum outline deviation for node reduction. Higher values make a simpler, more angular outline.'],
+            ['smooth', 'Smooth Small Details', 5, 0.05, 'Radius that rounds corners and removes small notches and protrusions. May close tiny holes.'],
+            ['breakWidth', 'Break Narrow Connections', 10, 0.05, 'Separate necks narrower than this width. Thin slivers and small islands may disappear.'],
+            ['tolerance', 'Reduce Nodes', 2, 0.01, 'Maximum outline deviation for node reduction. Higher values make a simpler, more angular outline.'],
           ].map(([key, label, max, step, hint]) => `<div class="control"><div class="control-label"><label for="simplify-${key}">${label}</label><div class="number-unit"><input type="number" id="simplify-${key}" min="0" max="${max}" step="${step}" value="0" aria-describedby="simplify-${key}-hint"><span>mm</span></div></div><input type="range" id="simplify-${key}-range" aria-label="${label} slider" aria-describedby="simplify-${key}-hint" min="0" max="${max}" step="${step}" value="0"><p class="control-hint" id="simplify-${key}-hint">${hint}</p></div>`).join('')}
-          <button id="simplify-reset" class="small-button">Reset adjustments</button>
+          <button id="simplify-reset" class="small-button">Reset Adjustments</button>
           <p class="simplify-scope">Uses all artwork, including hidden layers. Nested closed layers become holes; overlapping layers may change. Open paths only use node reduction.</p>
-          <p class="simplify-replace-note">Download SVG saves the simplified artwork at the current artwork size. Apply replaces the SVG and resets layer, tab, and region edits. Stencil settings stay in place. Undo restores the previous artwork and edits.</p>
+          <p class="simplify-replace-note">Download SVG saves the simplified artwork at the current artwork size. Apply replaces the SVG and resets layer, tab, bridge, and width-region edits. Stencil settings stay in place. Undo restores the previous artwork and edits.</p>
         </div>
       </div>
-      <div class="simplify-footer"><p id="simplify-status" role="status" aria-live="polite"></p><div><button id="cancel-simplify" class="small-button">Cancel</button><button id="download-simplify" class="small-button" disabled>Download SVG</button><button id="apply-simplify" class="download-button" disabled>Apply simplification</button></div></div>
+      <div class="simplify-footer"><p id="simplify-status" role="status" aria-live="polite"></p><div><button id="cancel-simplify" class="small-button">Cancel</button><button id="download-simplify" class="small-button" disabled>Download Simplified SVG</button><button id="apply-simplify" class="download-button" disabled>Apply Simplification</button></div></div>
     </dialog>`);
   const $ = selector => document.querySelector(selector), dialog = $('#simplify-dialog');
   const keys = ['smooth', 'breakWidth', 'tolerance'];
@@ -76,7 +75,7 @@ export function createSimplifyEditor({ state, commit, apply, download }) {
     }
     const before = nodeCount(original.contours), after = nodeCount(art.contours);
     const percent = before ? Math.round((1 - after / before) * 100) : 0;
-    $('#simplify-statistics').textContent = `Nodes: ${before.toLocaleString()} → ${after.toLocaleString()} (${Math.abs(percent)}% ${percent >= 0 ? 'fewer' : 'more'}) · Layers: ${original.contours.length} → ${art.contours.length}`;
+    $('#simplify-statistics').innerHTML = `<span>Nodes <strong>${before.toLocaleString()} → ${after.toLocaleString()}</strong><small>${Math.abs(percent)}% ${percent >= 0 ? 'fewer' : 'more'}</small></span><span>Contours <strong>${original.contours.length} → ${art.contours.length}</strong></span>`;
   }
   function requestPreview() {
     clearTimeout(timer); worker?.terminate(); worker = null;

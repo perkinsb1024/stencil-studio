@@ -1,3 +1,4 @@
+import { orderControls } from './ordered-list.js';
 import { pathData } from './geometry.js';
 import { scaleRegions, validPolygon, channelWidthAt, createChannelWidthProfile } from './regions.js';
 import { nearestOnContour } from './tab-layout.js';
@@ -32,7 +33,7 @@ export function createRegionEditor({ state, render, mutate, snapshot, restore, r
     if (state.regions.length >= 100) return notify('You can add up to 100 regions. Remove a region before adding another.', 'warning');
     mutate(() => {
       const id = `region-${crypto.randomUUID()}`;
-      state.regions.push({ id, points: structuredClone(state.regionDraft), width: state.regionWidth, taperLength: state.regionTaperLength, contourId: state.regionScope === 'all' ? null : state.regionScope });
+      state.regions.push({ id, label: `Region ${Math.max(0, ...state.regions.map(r => Number(r.label?.match(/\d+$/)?.[0]) || 0)) + 1}`, points: structuredClone(state.regionDraft), width: state.regionWidth, taperLength: state.regionTaperLength, contourId: state.regionScope === 'all' ? null : state.regionScope });
       state.selectedRegion = id; state.drawingRegion = false; state.regionDraft = []; hover = null;
     });
   }
@@ -43,18 +44,18 @@ export function createRegionEditor({ state, render, mutate, snapshot, restore, r
     if (region) { state.regionWidth = region.width; state.regionTaperLength = taperLength(region); state.regionScope = region.contourId ?? 'all'; }
     const channelContours = state.artwork.contours.filter(c => materialMode(c, state) === 'outline');
     if (state.regionScope !== 'all' && !channelContours.some(c => c.id === state.regionScope)) state.regionScope = channelContours[0]?.id ?? 'all';
-    $('#edit-regions').textContent = state.editingRegions ? 'Done editing' : 'Edit regions';
+    $('#edit-regions').textContent = 'Width Regions';
     $('#edit-regions').setAttribute('aria-pressed', state.editingRegions);
     $('#edit-regions').setAttribute('aria-expanded', state.editingRegions);
     $('#region-inspector').hidden = !state.editingRegions;
-    $('#region-count').textContent = `${state.regions.length} region${state.regions.length === 1 ? '' : 's'}`;
-    $('#region-picker').innerHTML = '<option value="">Select a region…</option>' + state.regions.map((r, i) => `<option value="${r.id}">Region ${i + 1} · ${r.width} mm · ${r.contourId === null ? 'All layers' : `Layer ${state.artwork.contours.findIndex(c => c.id === r.contourId) + 1}`}</option>`).join('');
+    $('#region-count').textContent = `${state.regions.length} Region${state.regions.length === 1 ? '' : 's'}`;
+    $('#region-picker').innerHTML = '<option value="">Select a region…</option>' + state.regions.map((r, i) => `<option value="${r.id}">${r.label ?? `Region ${i + 1}`} (${r.width} mm, ${r.contourId === null ? 'All Layers' : `Layer ${state.artwork.contours.findIndex(c => c.id === r.contourId) + 1}`})</option>`).join('');
     $('#region-picker').value = state.selectedRegion ?? '';
-    $('#region-scope').innerHTML = '<option value="all">All layers</option>' + channelContours.map(c => `<option value="${c.id}">Layer ${state.artwork.contours.indexOf(c) + 1}${state.hiddenContours.includes(c.id) ? ' · Hidden' : ''}</option>`).join('');
+    $('#region-scope').innerHTML = '<option value="all">All Layers</option>' + channelContours.map(c => `<option value="${c.id}">Layer ${state.artwork.contours.indexOf(c) + 1}${state.hiddenContours.includes(c.id) ? ' (Hidden)' : ''}</option>`).join('');
     // A region assigned before an outline became a cut-away retains its scope.
-    if (region?.contourId && !channelContours.some(c => c.id === region.contourId)) $('#region-scope').insertAdjacentHTML('beforeend', `<option value="${region.contourId}">Layer ${state.artwork.contours.findIndex(c => c.id === region.contourId) + 1} · Keep / Cut Away</option>`);
+    if (region?.contourId && !channelContours.some(c => c.id === region.contourId)) $('#region-scope').insertAdjacentHTML('beforeend', `<option value="${region.contourId}">Layer ${state.artwork.contours.findIndex(c => c.id === region.contourId) + 1} (Inactive: Keep / Cut Away)</option>`);
     $('#region-scope').value = region?.contourId ?? (region ? 'all' : state.regionScope);
-    $('#select-region-layer').textContent = pickingLayer ? 'Cancel' : 'Select';
+    $('#select-region-layer').textContent = pickingLayer ? 'Cancel' : 'Pick Layer';
     $('#select-region-layer').setAttribute('aria-pressed', pickingLayer);
     $('#select-region-layer').disabled = !pickableContours().length;
     for (const [id, value] of [['region-width', state.regionWidth], ['region-taper-length', state.regionTaperLength]]) {
@@ -69,11 +70,19 @@ export function createRegionEditor({ state, render, mutate, snapshot, restore, r
     $('#cancel-region').hidden = !state.drawingRegion;
     $('#remove-region').disabled = !region || state.drawingRegion;
     $('#region-picker').disabled = state.drawingRegion;
-    $('#region-hint').textContent = pickingLayer
-      ? 'Click a layer in the preview to select it. Escape or Cancel stops selection.'
-      : state.drawingRegion
-      ? `Click to add corners (${state.regionDraft.length}/200). Double-click to place the final corner and finish, or click the first corner to close it. Enter finishes; Backspace removes the last corner; Escape cancels.`
-      : 'Draw a polygon around a tight area, then set its channel width, taper length and layer. Select a region to adjust it; drag its corners or interior to reshape or move it. Later regions take priority where they overlap. Keep and Cut Away treatments use their original boundaries.';
+    $('#region-hint').textContent = pickingLayer ? 'Choose an Outline layer in the canvas. Escape cancels.' : state.drawingRegion ? `${state.regionDraft.length} corners. Click to add; double-click or Enter finishes. Escape cancels.` : region && region.contourId && !channelContours.some(c => c.id === region.contourId) ? 'This region is inactive because its layer no longer uses Outline.' : 'Draw a polygon, then adjust its width. Drag corners or the interior to reshape it.';
+    const list = $('#region-list');
+    const listKey = JSON.stringify([state.regions, state.selectedRegion, state.drawingRegion]);
+    if (list.regionKey !== listKey) {
+      const focus = list.contains(document.activeElement) ? document.activeElement.id : null;
+      const scroll = list.scrollTop;
+      list.innerHTML = [...state.regions].reverse().map((r, index) => {
+        const label = r.label ?? `Region ${state.regions.indexOf(r) + 1}`;
+        return `<div class="region-row ${state.selectedRegion === r.id ? 'selected' : ''}" role="listitem" data-order-id="${r.id}" data-order-label="${label}">${orderControls(`region-${r.id}`, label, index, state.regions.length, state.drawingRegion)}<button data-select-region="${r.id}" aria-pressed="${state.selectedRegion === r.id}"><strong>${label}</strong><small>${r.width} mm, ${r.contourId === null ? 'All Layers' : `Layer ${state.artwork.contours.findIndex(c => c.id === r.contourId) + 1}`}</small></button></div>`;
+      }).join('') || '<p class="empty-state">No width regions yet.</p>';
+      list.regionKey = listKey; list.scrollTop = scroll;
+      if (focus) document.getElementById(focus)?.focus({ preventScroll: true });
+    }
     svg.classList.toggle('editing-regions', state.editingRegions);
     svg.classList.toggle('drawing-region', state.editingRegions && state.drawingRegion);
     svg.classList.toggle('picking-region-layer', pickingLayer);
@@ -84,7 +93,7 @@ export function createRegionEditor({ state, render, mutate, snapshot, restore, r
     const unit = screenUnit();
     const shapes = state.scaled.regions.map((r, i) => {
       const active = r.id === state.selectedRegion;
-      return `<g class="width-region ${active ? 'selected' : ''}"><path data-region="${r.id}" d="${pathData(r.points)}" tabindex="0" role="button" aria-label="Region ${i + 1}, ${r.width} millimeters, ${r.contourId === null ? 'all layers' : `layer ${state.artwork.contours.findIndex(c => c.id === r.contourId) + 1}`}" aria-pressed="${active}" vector-effect="non-scaling-stroke"/><text x="${r.points[0].x}" y="${r.points[0].y - unit * 9}" font-size="${unit * 11}" pointer-events="none">${i + 1} · ${r.width} mm</text>${active && !state.drawingRegion ? r.points.map((p, j) => `<circle data-region="${r.id}" data-region-vertex="${j}" cx="${p.x}" cy="${p.y}" r="${unit * 6}" tabindex="0" role="button" aria-label="Region ${i + 1} corner ${j + 1}; drag or use arrow keys to move" vector-effect="non-scaling-stroke"/>`).join('') : ''}</g>`;
+      return `<g class="width-region ${active ? 'selected' : ''}"><path data-region="${r.id}" d="${pathData(r.points)}" tabindex="0" role="button" aria-label="Region ${i + 1}, ${r.width} millimeters, ${r.contourId === null ? 'all layers' : `layer ${state.artwork.contours.findIndex(c => c.id === r.contourId) + 1}`}" aria-pressed="${active}" vector-effect="non-scaling-stroke"/><text x="${r.points[0].x}" y="${r.points[0].y - unit * 9}" font-size="${unit * 11}" pointer-events="none">${r.label ?? `Region ${i + 1}`} (${r.width} mm)</text>${active && !state.drawingRegion ? r.points.map((p, j) => `<circle data-region="${r.id}" data-region-vertex="${j}" cx="${p.x}" cy="${p.y}" r="${unit * 6}" tabindex="0" role="button" aria-label="Region ${i + 1} corner ${j + 1}; drag or use arrow keys to move" vector-effect="non-scaling-stroke"/>`).join('') : ''}</g>`;
     }).join('');
     const points = toSheet(state.regionDraft);
     const draft = state.drawingRegion ? `<g class="region-draft" pointer-events="none"><path d="${pathData(hover ? [...points, hover] : points, points.length >= 3)}" vector-effect="non-scaling-stroke"/>${points.map((p, i) => `<circle cx="${p.x}" cy="${p.y}" r="${unit * (i ? 4 : 7)}" vector-effect="non-scaling-stroke"/>`).join('')}</g>` : '';
@@ -119,6 +128,7 @@ export function createRegionEditor({ state, render, mutate, snapshot, restore, r
     commit(); finishGesture();
     pickingLayer = !pickingLayer; pickingArtwork = state.artwork; hover = null; render();
   });
+  $('#region-list').addEventListener('click', event => { const button = event.target.closest('[data-select-region]'); if (button && !state.drawingRegion) select(button.dataset.selectRegion); });
   $('#region-picker').addEventListener('change', e => select(e.target.value || null));
   $('#draw-region').addEventListener('click', () => {
     pickingLayer = false;

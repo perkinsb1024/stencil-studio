@@ -31,7 +31,8 @@ function slice(contour, from, to) {
 }
 
 export function generateStencil(contours, options) {
-  const materialFeatures = options.sheet && (Object.values(options.materialTreatments ?? {}).some(mode => mode !== 'outline') || options.regionBridges?.length || options.analyzeMaterial);
+  const materialEdits = Object.values(options.materialTreatments ?? {}).some(mode => mode !== 'outline') || options.regionBridges?.length;
+  const materialFeatures = options.sheet && (materialEdits || options.analyzeMaterial);
   const { tabCount, tabLayouts = {} } = options;
   const hidden = new Set(options.hiddenContours ?? []);
   const cutaways = new Set(options.cutawayContours ?? []);
@@ -96,7 +97,8 @@ export function generateStencil(contours, options) {
   clipper.Execute(ClipperLib.ClipType.ctUnion, result, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
   let paths = result.map(path => path.map(p => ({ x: p.X / SCALE, y: p.Y / SCALE })));
   const material = materialFeatures ? composeMaterial(contours, paths, options) : null;
-  if (material) { paths = material.paths; warnings.push(...material.warnings); }
+  // A review-only connectivity check must not rewrite the channel geometry.
+  if (material) { if (materialEdits || options.cutawayContours?.length) paths = material.paths; warnings.push(...material.warnings); }
   if (reducedTabs) warnings.push('Some small contours have fewer or narrower tabs so there is room for the channel.');
   // Nearby outlines can cut across a bridge. Detect this rather than claiming every island is supported.
   const damaged = bridges.filter(b => {

@@ -3,6 +3,8 @@ import { generateStencil, measureContour } from './geometry.js';
 const SCALE = 10000;
 const labels = { outline: 'Outline', keep: 'Keep', cut: 'Cut Away', hidden: 'Hidden' };
 export const treatmentLabel = mode => labels[mode] ?? mode;
+// Physical support concerns do not change the inferred layer type.
+export const isAutomaticSuggestion = suggestion => suggestion.confidence === 'high' || ['keep', 'cut'].includes(suggestion.mode) && suggestion.confidence === 'medium';
 export const suggestionDefaults = () => ({ areaSuggestions: null, areaOverrides: {} });
 
 // Use the same integer polygons and fill rules as the material compositor.
@@ -120,12 +122,11 @@ export function suggestAreas(artwork, settings) {
   const cuts = result.paths.map(path => path.map(p => ({ X: Math.round(p.x * SCALE), Y: Math.round(p.y * SCALE) })));
   const erasedKeep = regions.some(r => !settings.areaOverrides?.[r.id] && proposed.materialTreatments[r.id] === 'keep' && area(polygons(r.paths, cuts, 'ctIntersection')) > 0.00001);
   if (erasedKeep) suggestions.warnings.push('Proposed cuts erase retained details. Review the layer order and treatments.');
-  // Review connected sets together: a cut cannot silently erase a detail or
-  // leave an island unsupported. Existing bridges participate in this check.
+  // Report support/detail concerns without replacing the inferred types with Outline.
+  // Existing bridges participate in this check.
   if (erasedKeep || result.unsupported.length || result.narrowConnections || result.components.filter(c => c.sheetConnected).length > 1 || result.regionBridges.some(b => !b.valid) || result.warnings.some(w => w.includes('intersect another'))) {
     for (const s of Object.values(byRegion)) if (s.mode === 'cut' || s.mode === 'keep') {
-      s.confidence = 'medium';
-      s.reason += ' The combined stencil needs support or detail review; use Edit bridges if material is detached.';
+      s.reason += ' The combined stencil needs support or detail review; use Edit Bridges if material is detached.';
     }
   }
   return suggestions;
@@ -139,7 +140,7 @@ export function applyAreaSuggestions(target, artwork, suggestions, { includeUnce
   for (const r of artwork.sourceRegions ?? []) {
     const s = suggestions.byRegion[r.id];
     if (!s || target.areaOverrides?.[r.id]) continue;
-    const mode = s.confidence === 'high' || includeUncertain ? s.mode : 'outline';
+    const mode = isAutomaticSuggestion(s) || includeUncertain ? s.mode : 'outline';
     target.materialTreatments[r.id] = mode === 'hidden' ? 'outline' : mode;
     for (const id of r.contourIds) { cutaways.delete(id); if (mode === 'hidden') hidden.add(id); else hidden.delete(id); }
   }

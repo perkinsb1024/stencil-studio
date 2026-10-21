@@ -111,7 +111,7 @@ export function composeMaterial(contours, channelCuts, options) {
   const narrowConnections = strongComponents.length > materialComponents.length || materialComponents.some(component => area(intersection(integer(component.paths), strongMaterial)) < 0.0001);
   const warnings = [];
   const unsupported = materialComponents.filter(component => !component.sheetConnected);
-  if (unsupported.length) warnings.push(`${unsupported.length} unsupported material area${unsupported.length === 1 ? '' : 's'}. Use Edit bridges to connect ${unsupported.length === 1 ? 'it' : 'them'} to the sheet.`);
+  if (unsupported.length) warnings.push(`${unsupported.length} unsupported material area${unsupported.length === 1 ? '' : 's'}. Use Edit Bridges to connect ${unsupported.length === 1 ? 'it' : 'them'} to the sheet.`);
   if (materialComponents.filter(component => component.sheetConnected).length > 1) warnings.push('Cuts split the outer sheet into separate sections. Add bridges between them.');
   if (narrowConnections) warnings.push(`Some material connections are narrower than ${minimumWidth.toFixed(1)} mm. Widen or reinforce them.`);
   const bridgeResults = bridges.map((bridge, i) => {

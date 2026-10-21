@@ -32,7 +32,7 @@ await check('Football regions preserve compound topology and expose editable tre
   assert($('#treatment-outline-0').value === 'cut');
   assert($('#treatment-outline-1').value === 'keep');
   assert(d.querySelectorAll('[data-treatment-outline]').length === 4, 'Expected one shared treatment per layer');
-  assert($('#notice').textContent.includes('1 unsupported'), $('#notice').textContent);
+  assert($('#geometry-issue-list').textContent.includes('1 unsupported'), $('#geometry-issue-list').textContent);
   assert($('#material-status').hidden, 'Support status should not repeat the warning');
   const { importSvg, examples } = await import('/src/import-svg.js');
   const art = importSvg(examples.football.svg);
@@ -48,7 +48,7 @@ await check('Compound treatments update together and undo restores the previous 
 });
 await check('Layer ordering changes actual cut geometry and can be undone', async () => {
   const before = $('.cut-shape').getAttribute('d');
-  await click('[data-material-move="shape-0"][data-direction="1"]');
+  await click('[data-order-id="shape-0"] [data-order-action="up"]');
   assert($('.cut-shape').getAttribute('d') !== before);
   await click('#undo'); assert($('.cut-shape').getAttribute('d') === before);
 });
@@ -56,7 +56,7 @@ await check('Automatic bridges support the central laces and preserve the band c
   await click('#edit-bridges');
   assert(!$('#bridge-inspector').hidden && $('#outline-inspector').hidden);
   await click('#generate-bridges');
-  assert($('#material-status').textContent.includes('All retained material'), $('#material-status').textContent);
+  assert($('#bridge-support').textContent.includes('All Material Connected'), $('#material-status').textContent);
   assert(flush().document.regionBridges.length === 1);
   initialBridgeWidth = flush().document.regionBridges[0].width;
   assert(initialBridgeWidth > 3, 'Expected the bridge to match the lace spine width');
@@ -104,7 +104,7 @@ await check('Manual anchors create a bridge and endpoint dragging is one reversi
   }
   await click('#add-bridge'); pointer('pointerdown', p); await tick(); pointer('pointerdown', q); await tick();
   assert(flush().document.regionBridges.length === 1);
-  assert($('#material-status').textContent.includes('All retained material'), $('#material-status').textContent);
+  assert($('#bridge-support').textContent.includes('All Material Connected'), $('#material-status').textContent);
   const before = structuredClone(flush().document.regionBridges[0]);
   const endpoint = d.querySelector('[data-bridge-end="b"]');
   pointer('pointerdown', q, endpoint); pointer('pointermove', { x: q.x + 3, y: q.y }); pointer('pointerup', { x: q.x + 3, y: q.y }); await tick();
@@ -195,10 +195,10 @@ await check('Bridge panel and treatment controls fit a narrow preview', async ()
   frame.style.width = '375px'; await tick();
   assert(d.documentElement.scrollWidth <= d.documentElement.clientWidth + 1, 'Page overflows at 375px');
   await click('#edit-outlines');
-  for (const row of d.querySelectorAll('.outline-row')) {
+  for (const row of d.querySelectorAll('.layer-card')) {
     const bounds = row.getBoundingClientRect();
     for (const control of row.querySelectorAll('select,button,label')) {
-      const b = control.getBoundingClientRect(); assert(b.left >= bounds.left - 1 && b.right <= bounds.right + 1, 'Outline control overflows');
+      const b = control.getBoundingClientRect(); if (!b.width || control.closest('[popover]')) continue; assert(b.left >= bounds.left - 1 && b.right <= bounds.right + 1, 'Outline control overflows');
     }
   }
   frame.style.width = '1200px';

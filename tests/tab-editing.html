@@ -39,15 +39,15 @@ await check('Edit mode exposes selectable tabs, inspector and automatic legend',
   const after = $('#preview-svg').getBoundingClientRect();
   assert(Math.abs(before.width - after.width) < 1 && Math.abs(before.height - after.height) < 1, 'Opening tab editing shrank the SVG');
   assert(markers().every(m => m.getAttribute('role') === 'button' && m.getAttribute('tabindex') === '0'));
-  assert($('.legend').textContent.includes('Automatic tab') && $('.legend').textContent.includes('Custom tab'));
+  assert($('.legend').textContent.includes('Automatic Tab') && $('.legend').textContent.includes('Custom Tab'));
 });
-await check('Selected-tab card stays above the canvas without shifting it on selection or clear', async () => {
+await check('Selected-tab controls stay in the inspector without shifting it on selection or clear', async () => {
   const before = $('#canvas-area').getBoundingClientRect();
   const card = $('#tab-inspector').getBoundingClientRect();
-  assert(card.bottom <= before.top, 'Editor card is not above the canvas');
+  assert($('#tab-inspector').closest('.inspector'), 'Editor is not in the inspector');
   assert(!$('#tab-empty-state').hidden);
   await change('#tab-picker', 'auto-0');
-  assert($('#selected-outline-label').textContent === 'Selected tab · Layer 1 · Tab 1');
+  assert($('#selected-outline-label').textContent === 'Layer 1, Tab 1');
   assert($('#tab-inspector').classList.contains('has-selection'));
   assert($('#tab-empty-state').hidden);
   assert(Math.abs($('#canvas-area').getBoundingClientRect().top - before.top) < 1, 'Selecting a tab shifted the canvas');
@@ -73,7 +73,7 @@ await check('SVG stays the same size when toggling editing, placement, and outli
 await check('Removing an automatic tab freezes only its outline and can be undone/redone', async () => {
   await change('#tab-picker', 'auto-0'); await click('#remove-tab');
   assert(own().length === 3); assert($('#outline-mode').textContent === 'Custom');
-  assert($('#automatic-scope').textContent.includes('1 automatic layer'));
+  assert($('#automatic-scope').textContent.includes('1 automatic outline'));
   assert(own().every(m => m.querySelector('circle') && !m.querySelector('rect')));
   await click('#undo'); assert(own().length === 4); assert($('#outline-mode').textContent === 'Automatic');
   await click('#redo'); assert(own().length === 3);
@@ -142,7 +142,7 @@ await check('Add mode keeps placing tabs across outlines until cancelled, with r
     const p = path.getPointAtLength(path.getTotalLength() * fraction).matrixTransform($('#preview-svg').getScreenCTM());
     pointer('pointermove', $('#preview-svg'), p); assert($('#tab-ghost'));
     pointer('pointerdown', $('#preview-svg'), p); await settle();
-    assert($('#add-tab').getAttribute('aria-pressed') === 'true' && $('#add-tab').textContent === 'Done adding');
+    assert($('#add-tab').getAttribute('aria-pressed') === 'true' && $('#add-tab').textContent === 'Finish Adding');
     assert($('#tab-ghost'), 'Placement preview disappeared after adding a tab');
   }
   assert(markers().length === before + 3);
@@ -191,7 +191,7 @@ await check('Keyboard selection and movement preserve focus', async () => {
 });
 await check('A custom outline can have zero tabs; reset restores automatic layout and can be undone', async () => {
   while (own().length) { await change('#tab-picker', own()[0].dataset.tab); await click('#remove-tab'); }
-  assert($('#notice').textContent.includes('no tabs')); assert($('.cut-shape').getAttribute('d'));
+  assert($('#geometry-issue-list').textContent.includes('no tabs')); assert($('.cut-shape').getAttribute('d'));
   await click('#reset-outline'); assert(own().length > 0); assert($('#outline-mode').textContent === 'Automatic');
   await click('#undo'); assert(own().length === 0); assert($('#outline-mode').textContent === 'Custom');
 });
@@ -202,8 +202,8 @@ await check('Automatic controls disable when every outline is custom, and reset-
   await click('#undo'); assert($('#tabCount').disabled); assert(!$('#reset-all-tabs').disabled);
 });
 await check('Changing the artwork clears edits and history without reusing outline edits', async () => {
-  await click('[data-example="orbit"]'); assert(markers().length === 18); assert($('#undo').disabled && $('#redo').disabled);
-  assert($('#automatic-scope').textContent.includes('3 automatic layers'));
+  await click('[data-example="orbit"]'); await click('#edit-tabs'); assert(markers().length === 18); assert($('#undo').disabled && $('#redo').disabled);
+  assert($('#automatic-scope').textContent.includes('3 automatic outlines'));
 });
 await check('Preview highlights never enter the exported cut SVG', async () => {
   let exported;
@@ -266,7 +266,7 @@ await check('Rectangle selection defaults to the outline chosen before dragging'
 await check('Rectangle selection spans outlines and sets a shared width with one undo', async () => {
   selectAllTabs();
   assert(markers().every(m => m.getAttribute('aria-pressed') === 'true'));
-  assert($('#selected-outline-label').textContent === `${markers().length} tabs selected`);
+  assert($('#selected-outline-label').textContent === `${markers().length} Tabs Selected`);
   await change('#selected-tab-width', 5);
   assert(markers().every(m => m.getAttribute('aria-label').includes('5.0 mm')));
   await click('#undo'); assert(markers().some(m => !m.getAttribute('aria-label').includes('5.0 mm')));
@@ -332,7 +332,7 @@ await check('Open-path group position stops at the endpoint without collapsing s
   const transfer = new w.DataTransfer(); transfer.items.add(file);
   $('#file-input').files = transfer.files; $('#file-input').dispatchEvent(new w.Event('change'));
   for (let i = 0; i < 40 && $('#filename').textContent !== 'open-group.svg'; i++) await settle();
-  assert($('#filename').textContent === 'open-group.svg', 'Test SVG did not load');
+  assert($('#filename').textContent === 'open-group.svg', 'Test SVG did not load'); await click('#edit-tabs');
   selectAllTabs();
   const before = markers().map(point);
   await change('#selected-tab-position', 100);

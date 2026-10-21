@@ -19,14 +19,14 @@ for (const name of ['mobile','tablet']) {
   const picker=d.querySelector('#tab-picker');picker.value='auto-0';picker.dispatchEvent(new w.Event('change'));await settle();
   pass &&= valid() && !d.querySelector('#selected-tab-controls').hidden;
   const card=d.querySelector('#tab-inspector').getBoundingClientRect(), selected=d.querySelector('#canvas-area').getBoundingClientRect();
-  pass &&= d.querySelector('#tab-inspector').parentElement.classList.contains('preview-panel') && card.bottom<=selected.top && Math.abs(selected.top-unselected.top)<1;
+  pass &&= !!d.querySelector('#tab-inspector').closest('.inspector') && Math.abs(selected.top-unselected.top)<1;
   const controls=d.querySelector('#selected-tab-controls').getBoundingClientRect();
   pass &&= controls.bottom<=d.querySelector('.tab-selection-area').getBoundingClientRect().bottom && controls.right<=card.right;
   const canvas=d.querySelector('#preview-svg').getBoundingClientRect();
   d.querySelector('#remove-tab').click();await settle();
   const after=d.querySelector('#preview-svg').getBoundingClientRect();
   pass &&= valid() && Math.abs(canvas.width-after.width)<1 && Math.abs(canvas.height-after.height)<1;
-  document.getElementById(name+'-status').textContent=pass?'PASS — no overflow; editing controls accessible; editor above preview; SVG size preserved':'FAIL — inspect layout or SVG rendering';
+  document.getElementById(name+'-status').textContent=pass?'PASS — no overflow; editing controls accessible; editor in inspector; SVG size preserved':'FAIL — inspect layout or SVG rendering';
  });
 }
 </script></html>

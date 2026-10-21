@@ -1,3 +1,7 @@
+import { updateWorkspaceUI } from './workspace-ui.js';
+import { pendingTypeReviews, typeReviewIds, decideLayerType } from './type-review.js';
+import { workspaceView } from './workspace-view.js';
+import { createOrderedList, orderControls } from './ordered-list.js';
 import { scaleRegions } from './regions.js';
 import { createRegionEditor } from './region-editor.js';
 import { importSvg, scaleArtwork, examples } from './import-svg.js';
@@ -32,139 +36,37 @@ const defaults = { artworkWidth: 150, channelWidth: 1.5, tabWidth: 3, tabCount: 
 const state = { ...defaults, artwork: null, source: null, example: '', name: 'Bloom.svg', view: 'material', showTabs: true, showOriginal: false, zoom: 1, panX: 0, panY: 0, sourceWarnings: [], result: null, scaled: null, tabLayouts: {}, hiddenContours: [], cutawayContours: [], regions: [], editingRegions: false, selectedRegion: null, drawingRegion: false, regionDraft: [], regionWidth: 0.8, regionTaperLength: 5, regionScope: 'outline-0', editingOutlines: false, selectedOutlines: [], showHiddenOutlines: true, editing: false, adding: false, selectedContour: null, selectedTab: null, selectedTabs: [], selectCurrentOutlineOnly: true };
 const $ = s => document.querySelector(s);
 const htmlText = text => String(text).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
-const materialDefaults = () => ({ ...suggestionDefaults(), materialVersion: 1, materialTreatments: {}, materialOrder: [], regionBridges: [], bridgeExclusions: [], bridgeWidth: 3, minimumMaterialWidth: 0.5, bridgeReinforcement: false, bridgeMatchFeatures: true });
-Object.assign(state, materialDefaults(), { editingBridges: false, selectedRegionBridge: null, selectedRegionBridges: [] });
+const materialDefaults = () => ({ ...suggestionDefaults(), areaDecisions: {}, areaSuggestionBasis: null, materialVersion: 1, materialTreatments: {}, materialOrder: [], regionBridges: [], bridgeExclusions: [], bridgeWidth: 3, minimumMaterialWidth: 0.5, bridgeReinforcement: false, bridgeMatchFeatures: true });
+Object.assign(state, { workflowStep: 1, activeTool: 'layers', showBridges: true, reviewingTypes: false, reviewRegion: null, layerQuery: '', layerFilter: 'all', controlsCollapsed: false, sourceChosen: false, areaDecisions: {} }, materialDefaults(), { editingBridges: false, selectedRegionBridge: null, selectedRegionBridges: [] });
 const outlineThumbnails = new WeakMap();
 
-document.querySelector('#app').innerHTML = `
-  <header class="app-header">
-    <a class="brand" href="./" aria-label="Stencil Studio home"><span>stencil<span class="brand-light">studio</span><span class="brand-dot">.</span></span></a>
-    <div class="header-right"><button class="text-button" id="help">${icon('help')} How it works</button></div>
-  </header>
-  <main>
-    <section class="intro"><h1>Make the cut<span>.</span></h1></section>
-    <div class="workspace">
-      <aside class="inspector" aria-label="Stencil settings">
-        <section class="control-section source-section"><div class="section-heading"><span class="step">01</span><h2>Your artwork</h2><span class="format-tag">SVG</span></div>
-          <input type="file" id="file-input" accept=".svg,image/svg+xml" hidden />
-          <button class="upload-zone" id="upload">${icon('upload')}<strong>Drop your SVG here</strong><span>or click to browse · up to 3 MB</span></button>
-          <div class="current-file">${icon('file')}<div><strong id="filename">Bloom.svg</strong><span id="source-info">2 vector contours</span></div><span class="file-check">${icon('check')}</span></div>
-          <button id="simplify-artwork" class="small-button simplify-launch" aria-haspopup="dialog" aria-controls="simplify-dialog">Simplify SVG ${icon('arrow')}</button>
-          <div class="examples"><span>Try a sample</span><button data-example="bloom" class="active" title="Bloom example">Bloom</button><button data-example="orbit" title="Orbit example">Orbit</button><button data-example="arch" title="Arch example">Arch</button><button data-example="football" title="Keep/Cut Away football; use Edit bridges to connect the laces">Football</button></div>
-        </section>
-        <section class="control-section"><div class="section-heading"><span class="step">02</span><h2>Shape your stencil</h2><button class="icon-button reset" id="reset" title="Reset settings" aria-label="Reset settings">${icon('reset')}</button></div>
-          <div class="control"><div class="control-label"><label for="artworkWidth">Artwork width</label><div class="number-unit"><input id="artworkWidth" type="number" min="10" max="1000" step="1" value="150" /><span>mm</span></div></div><p class="control-hint">Height scales with your artwork.</p></div>
-          <div class="control"><div class="control-label"><label for="channelWidth">Channel width</label><div class="number-unit"><input id="channelWidth" type="number" min="0.2" max="12" step="0.1" value="1.5" /><span>mm</span></div></div><input type="range" id="channelWidth-range" aria-label="Channel width slider" min="0.2" max="12" step="0.1" value="1.5" /><div class="range-labels"><span>Fine</span><span>Bold</span></div></div>
-          <div class="tab-divider"><span>RETAINING TABS</span><span class="tiny-bridge"><i></i><i></i></span></div>
-          <div class="control"><div class="control-label"><label for="tabWidth">Default tab width</label><div class="number-unit"><input id="tabWidth" type="number" min="0.5" max="15" step="0.1" value="3" /><span>mm</span></div></div><input type="range" id="tabWidth-range" aria-label="Default tab width slider" min="0.5" max="15" step="0.1" value="3" /></div>
-          <div class="control"><div class="control-label"><label for="tabCount">Automatic tabs per layer</label><div class="stepper"><button id="tabs-minus" aria-label="Fewer tabs">${icon('minus')}</button><input type="number" id="tabCount" min="1" max="24" step="1" value="4" /><button id="tabs-plus" aria-label="More tabs">${icon('plus')}</button></div></div></div>
-          <div class="control position-control"><div class="control-label"><label for="tabOffset">Automatic tab position</label><output id="offset-value">0%</output></div><input type="range" id="tabOffset" min="0" max="100" step="1" value="0" aria-label="Automatic tab position" /><p class="control-hint">Slide automatic tabs around closed layers.</p></div>
-          <p class="control-hint" id="automatic-scope"></p>
-          <div class="control"><div class="control-label"><span class="shape-setting-label" id="tab-ends-label">Tab ends</span><div class="view-switch shape-setting" role="group" aria-labelledby="tab-ends-label"><button type="button" data-shape-setting="roundedTabs" data-rounded="true" aria-pressed="false">Rounded</button><button type="button" data-shape-setting="roundedTabs" data-rounded="false" aria-pressed="true" class="active">Sharp</button></div></div><p class="control-hint">Shape the cut-channel ends beside tabs, keeping the tab gap.</p></div>
-          <div class="control"><div class="control-label"><span class="shape-setting-label" id="channel-corners-label">Channel corners</span><div class="view-switch shape-setting" role="group" aria-labelledby="channel-corners-label"><button type="button" data-shape-setting="roundedChannelCorners" data-rounded="true" aria-pressed="true" class="active">Rounded</button><button type="button" data-shape-setting="roundedChannelCorners" data-rounded="false" aria-pressed="false">Sharp</button></div></div></div>
-          <button class="small-button" id="reset-all-tabs" disabled>Reset all to automatic</button>
-
-        </section>
-        <section class="control-section output-section"><div class="section-heading"><span class="step">03</span><h2>Ready for your cutter</h2></div><button id="download" class="download-button">${icon('download')}<span>Download stencil</span><span class="download-type">.svg</span></button><p class="export-note">Closed vector paths · actual-size export</p><button id="export-session" class="small-button session-export">${icon('download')}<span>Export session</span><span class="session-type">.json</span></button><p class="export-note">Original SVG · settings · edits · undo history</p></section>
-        <div class="privacy-note">Your files stay on your device.</div>
-      </aside>
-      <section class="preview-panel" aria-label="Stencil preview">
-        <div class="preview-toolbar"><div class="preview-heading"><span class="live-dot"></span><h2>Live preview</h2></div><div class="view-switch" role="group" aria-label="Preview mode"><button id="material-view" class="active" aria-pressed="true">Stencil</button><button id="cut-view" aria-pressed="false">Cut paths</button></div></div>
-        <div class="preview-options"><label class="check-label"><input type="checkbox" id="show-tabs" checked /><span>Highlight tabs</span><span class="swatch amber"></span></label><label class="check-label"><input type="checkbox" id="show-original" /><span>Original layer</span></label><span class="preview-units">UNITS: MM</span></div>
-        <div class="tab-edit-toolbar" role="group" aria-label="Editing mode">
-          <button id="edit-outlines" class="small-button" aria-pressed="false" aria-controls="outline-inspector" aria-expanded="false">Edit layers</button>
-          <button id="edit-tabs" class="small-button" aria-pressed="false" aria-controls="tab-inspector" aria-expanded="false">Edit tabs</button>
-          <button id="edit-regions" class="small-button" aria-pressed="false" aria-controls="region-inspector" aria-expanded="false">Edit regions</button>
-          <button id="edit-bridges" class="small-button" aria-pressed="false" aria-controls="bridge-inspector" aria-expanded="false">Edit bridges</button>
-          <button id="review-areas" class="small-button">Review uncertain</button>
-          <span class="edit-spacer"></span>
-          <button id="undo" class="small-button" aria-label="Undo last change" title="Undo (⌘/Ctrl Z)" disabled>Undo</button>
-          <button id="redo" class="small-button" aria-label="Redo last change" title="Redo (⌘/Ctrl Shift Z)" disabled>Redo</button>
-        </div>
-        <section class="outline-inspector editing-panel" id="outline-inspector" aria-label="Layer editor" hidden>
-          <div class="tab-inspector-heading"><strong>Layer settings</strong><span id="outline-count" role="status"></span></div>
-          <p class="edit-hint">Choose Outline for a channel, Keep for white retained material, or Cut Away for a purple opening. Layers at the top of the list are drawn on top of layers below them. Contours grouped under a layer share its treatment and move together. Use Up/Down to change overlap order. Hidden layers are omitted. Tab edits are preserved.</p>
-          <div class="suggestion-actions"><button id="apply-area-suggestions" class="small-button">Reapply safe suggestions</button><button id="use-all-outlines" class="small-button">Use all outlines</button><button id="accept-area-suggestion" class="small-button" disabled>Use suggestion for selected</button></div>
-          <p id="area-review-hint" class="edit-hint" role="status">Select an area in the preview or a layer below, then choose its treatment. Manual choices are preserved when suggestions are reapplied.</p>
-          <div class="outline-actions"><button id="hide-outlines" class="small-button" disabled>Hide selected</button><button id="show-outlines" class="small-button" disabled>Show selected</button><button id="keep-only-outlines" class="small-button" disabled>Show only selected</button><button id="show-all-outlines" class="small-button" disabled>Show all layers</button></div>
-          <label class="check-label hidden-outline-toggle"><input type="checkbox" id="show-hidden-outlines" checked /><span>Show hidden layers as dashed guides</span></label>
-          <div id="outline-list" class="outline-list" role="group" aria-label="Layers"></div>
-        </section>
-        <section class="tab-inspector editing-panel" id="tab-inspector" aria-label="Selected tab editor" hidden>
-          <div class="tab-inspector-heading"><strong id="selected-outline-label">Tab editing</strong><span id="outline-mode" class="mode-badge"></span></div>
-          <p class="edit-hint" id="edit-hint" role="status" hidden></p>
-          <div class="tab-pickers">
-            <div><label for="outline-picker">Layer</label><select id="outline-picker" aria-label="Select layer"></select></div>
-            <div><label for="tab-picker">Tab</label><select id="tab-picker" aria-label="Select tab"></select></div>
-          </div>
-          <fieldset class="selection-scope">
-            <legend>Drag a rectangle to select tabs on:</legend>
-            <div class="selection-scope-options">
-              <label><input type="radio" name="rectangle-selection-scope" id="selected-layer-only" value="selected" checked /><span>Selected layer only</span></label>
-              <label><input type="radio" name="rectangle-selection-scope" id="all-layers" value="all" /><span>All layers</span></label>
-            </div>
-          </fieldset>
-          <div class="tab-selection-area">
-            <div id="tab-empty-state"><strong>Select a tab in the preview</strong><span>Or choose one above to adjust its width and position.</span></div>
-            <div id="selected-tab-controls" hidden>
-              <div class="control tab-width-control"><div class="control-label"><label for="selected-tab-width">Width</label><div class="number-unit"><input id="selected-tab-width" type="number" min="0.5" max="15" step="0.1" /><span>mm</span></div></div><input id="selected-tab-width-range" type="range" min="0.5" max="15" step="0.1" aria-label="Selected tab width slider" /><p id="tab-width-status" class="control-hint"></p></div>
-              <div class="control tab-position-control"><div class="control-label"><label for="selected-tab-position">Position</label><div class="number-unit"><input id="selected-tab-position" type="number" min="0" max="100" step="0.1" /><span>%</span></div></div><input id="selected-tab-position-range" type="range" min="0" max="100" step="0.1" aria-label="Selected tab position slider" /></div>
-            </div>
-          </div>
-          <div class="outline-actions"><button id="inherit-tab-width" class="small-button" disabled>Use default width</button><button id="remove-tab" class="small-button danger" disabled>Remove selected tab</button><button id="add-tab" class="small-button" aria-pressed="false" hidden>Add tab</button><button id="reset-outline" class="small-button" title="Clears this layer’s custom positions and width overrides. Undo is available.">Reset layer to automatic</button></div>
-          <p class="control-hint" id="outline-mode-hint"></p>
-        </section>
-        <section class="region-inspector editing-panel" id="region-inspector" aria-label="Channel width regions" hidden>
-          <div class="tab-inspector-heading"><strong>Channel width regions</strong><span id="region-count" role="status"></span></div>
-          <p class="edit-hint" id="region-hint" role="status"></p>
-          <div class="region-fields">
-            <div class="region-picker-field"><label for="region-picker">Region · later regions override earlier ones</label><select id="region-picker" aria-label="Select region"></select></div>
-            <div class="region-scope-field"><label for="region-scope">Apply to</label><div class="region-scope-picker"><select id="region-scope" aria-label="Region layers"></select><button id="select-region-layer" class="small-button" aria-pressed="false" aria-describedby="region-hint">Select</button></div></div>
-            <div class="control region-width-control"><label for="region-width">Channel width (mm)</label><input id="region-width" type="number" min="0.2" max="12" step="0.1" value="0.8" /><input id="region-width-range" type="range" min="0.2" max="12" step="0.1" value="0.8" aria-label="Region channel width slider" /></div>
-            <div class="control region-width-control"><label for="region-taper-length">Taper length (mm)</label><input id="region-taper-length" type="number" min="0.1" max="50" step="0.1" value="5" aria-describedby="region-taper-hint" /><input id="region-taper-length-range" type="range" min="0.1" max="50" step="0.1" value="5" aria-label="Region taper length slider" aria-describedby="region-taper-hint" /></div>
-          </div>
-          <p class="control-hint" id="region-taper-hint">Taper length sets the transition distance outside the region boundary.</p>
-          <div class="region-actions"><button id="draw-region" class="small-button">Draw polygon</button><button id="finish-region" class="small-button" hidden>Finish polygon</button><button id="cancel-region" class="small-button" hidden>Cancel drawing</button><button id="remove-region" class="small-button" disabled>Remove region</button></div>
-        </section>
-        ${bridgePanel}
-        <div id="notice" class="notice" role="status" hidden></div>
-        <p id="material-status" class="outlines-empty" role="status" hidden></p>
-        <p id="outlines-empty" class="outlines-empty" role="status" hidden>All layers are hidden. Use Edit layers to show them again. Nothing will be exported.</p>
-        <div class="canvas-area" id="canvas-area">
-          <div class="canvas-viewport" id="canvas-viewport">
-            <div class="canvas-corner top-left"></div><div class="canvas-corner bottom-right"></div>
-            <div class="sheet-wrap" id="sheet-wrap"><svg id="preview-svg" xmlns="http://www.w3.org/2000/svg" role="group" aria-label="Generated stencil with cut channels and retaining tabs"></svg><div class="dimension-width" id="dimension-width">150 mm</div><div class="dimension-height" id="dimension-height">150 mm</div></div>
-          </div>
-          <div class="canvas-bottom-bar">
-            <div class="canvas-label"><span class="status-dot"></span> LIVE VECTOR PREVIEW</div>
-            <div class="zoom-controls"><button id="pan-preview" aria-label="Pan preview" aria-pressed="false" title="Pan tool (or hold Space and drag while editing)" disabled>Pan</button><span class="zoom-divider"></span><button id="zoom-out" aria-label="Zoom out">${icon('minus')}</button><span id="zoom-label">100%</span><button id="zoom-in" aria-label="Zoom in">${icon('plus')}</button><span class="zoom-divider"></span><button id="zoom-fit" title="Fit to view" aria-label="Fit to view">${icon('fit')}</button></div>
-          </div>
-        </div>
-        <p class="preview-pan-hint">Zoom in and drag to pan. While editing, choose Pan or hold Space and drag. Fit recenters.</p>
-        <div class="preview-footer"><div class="legend"><span><i class="legend-cut"></i> Cut away</span><span><i class="legend-material"></i> Keep material</span><span><i class="legend-tab"></i> Automatic tab</span><span><i class="legend-custom-tab"></i> Custom tab</span></div><span id="cut-count">8 cut regions</span></div>
-      </section>
-    </div>
-  </main>
-  <dialog id="help-dialog"><button id="close-help" class="icon-button dialog-close" aria-label="Close help">${icon('close')}</button><div class="eyebrow">A QUICK FIELD GUIDE</div><h2>A cut above.</h2><p>Make a reusable stencil in three steps.</p><ol><li><strong>Bring your vectors.</strong><span>Upload an SVG with paths or shapes. Convert text, masks, and clipping to plain paths in your drawing app first.</span></li><li><strong>Make room for the cut.</strong><span>Channel width sets the strip of material to remove along each layer. Tabs leave small uncut bridges that hold the inner pieces in place.</span></li><li><strong>Send it to your cutter.</strong><span>Download the SVG, import it into your cutter’s software, and cut the edges of the black shapes. Match the imported size to the SVG dimensions.</span></li></ol><div class="help-tip"><strong>Before the big cut</strong><p>Black areas come out; light areas stay. Amber squares mark automatic tabs; teal circles mark custom tabs. Both are preview-only. Use Edit layers to choose Outline channels, white Keep material, or purple Cut Away openings. Keep and Cut Away follow their exact resolved boundaries, without channel-width offsets. Layers at the top of the list are drawn on top of layers below them; Up and Down change their order. Contours grouped under a layer share its treatment and move together. Use Edit bridges to connect unsupported white areas to the surrounding sheet. Generate bridges automatically, or add one by placing two anchors inside white material. Select a bridge to change its width or drag its endpoints. Automatic regeneration preserves custom bridges. Inspect the support status and highlighted unsupported areas before cutting. Tab edits are preserved when switching back. Hidden layers are left out of the download. Use Edit regions to draw polygons with a different channel width for one layer or all layers. Drag a region or its corners to adjust it. Use Edit tabs to add, remove, move, or resize individual tabs. Editing makes that layer custom; automatic placement then affects only other layers. Default width still applies unless a tab has a width override. Inspect small details and overlapping layers, and test-cut a sample for your material. The sheet boundary is not exported as a cut.</p></div><button id="got-it" class="download-button">Got it ${icon('check')}</button></dialog>
-`;
+document.querySelector('#app').innerHTML = workspaceView(icon, bridgePanel);
+// The tool header does not scroll away when the object inspector is long.
+const inspectorHeader = document.createElement('div');
+inspectorHeader.id = 'shape-header';
+inspectorHeader.className = 'inspector-header';
+inspectorHeader.hidden = true;
+inspectorHeader.append($('.size-section'), $('.tab-edit-toolbar'), $('#toggle-controls'));
+$('.inspector').prepend(inspectorHeader);
 
 let noticeTimer;
 function notify(message, kind = 'success') {
   const el = $('#notice');
   clearTimeout(noticeTimer); el.textContent = message; el.className = `notice ${kind}`; el.hidden = false;
-  if (kind !== 'warning') noticeTimer = setTimeout(() => { el.hidden = true; }, 6000);
+  if (kind === 'success') noticeTimer = setTimeout(() => { el.hidden = true; }, 6000);
 }
 
 function render() {
   if (!state.artwork) return;
+  syncEditingFlags();
   const padding = Math.max(state.margin, Math.max(state.channelWidth, ...state.regions.map(r => r.width)) / 2 + 2);
   state.scaled = { ...scaleArtwork(state.artwork, state.artworkWidth, padding), padding, regions: scaleRegions(state.regions, state.artworkWidth, padding) };
-  state.result = generateStencil(state.scaled.contours, { ...state, regions: state.scaled.regions, sheet: state.scaled, analyzeMaterial: state.editingBridges, regionBridges: scaleBridges(state.regionBridges, state.artworkWidth, padding) });
+  state.result = generateStencil(state.scaled.contours, { ...state, regions: state.scaled.regions, sheet: state.scaled, analyzeMaterial: state.editingBridges || state.workflowStep === 3, regionBridges: scaleBridges(state.regionBridges, state.artworkWidth, padding) });
   const { width, height, contours, artworkHeight } = state.scaled;
   const visible = visibleContours();
   const tabContours = channelContours();
   if (!tabContours.some(c => c.id === state.selectedContour)) selectTab(tabContours[0]?.id ?? null, null);
-  if (!tabContours.length) { state.editing = false; state.adding = false; }
+  if (!tabContours.length) state.adding = false;
   // Drop selections removed by resets, undo, or changes to automatic placement.
   state.selectedTabs = state.selectedTab == null ? [] : state.selectedTabs.filter(ref => state.result.bridges.some(b => matchesTab(b, ref)));
   if (state.selectedTabs.length && !selectedBridge()) {
@@ -189,65 +91,103 @@ function render() {
   if ((state.showTabs || state.editing) && !state.editingOutlines) svg.innerHTML += renderTabMarkers();
   if (state.editingOutlines) svg.innerHTML += renderOutlineTargets();
   if (state.editingRegions) svg.innerHTML += regionEditor.overlay();
-  if (state.editingBridges || state.showTabs) svg.innerHTML += bridgeEditor.overlay();
+  if (state.editingBridges || state.showBridges || state.workflowStep === 3) svg.innerHTML += bridgeEditor.overlay();
   svg.classList.toggle('editing-tabs', state.editing);
   svg.classList.toggle('editing-outlines', state.editingOutlines);
   svg.classList.toggle('adding-tab', state.adding);
   $('#dimension-width').textContent = `${width.toFixed(1)} mm`;
   $('#dimension-height').textContent = `${height.toFixed(1)} mm`;
-  $('#cut-count').textContent = `${state.result.paths.length} cut boundaries · ${state.result.bridges.length} tabs · ${state.regionBridges.length} bridges`;
   const support = $('#material-status');
-  const hasMaterialWarning = state.result.unsupported?.length || state.result.components?.filter(c => c.sheetConnected).length > 1 || state.result.narrowConnections || state.result.regionBridges?.some(b => !b.valid);
-  support.hidden = !state.result.components || Boolean(hasMaterialWarning);
-  support.textContent = state.result.components && !hasMaterialWarning ? (state.result.components.length ? 'All retained material is connected to the sheet.' : 'No retained material remains.') : '';
-  $('#source-info').textContent = `${visible.length} of ${contours.length} layers visible · ${state.artworkWidth} × ${artworkHeight.toFixed(1)} mm`;
-  $('#outlines-empty').hidden = visible.length > 0;
+  support.hidden = true;
   $('#offset-value').textContent = `${state.tabOffset}%`;
+  updateWorkspaceUI(state);
   fitSheet();
-  updateModeCarets();
-  const warnings = [...state.sourceWarnings.filter(w => w !== 'Open paths are included as channels with square ends.' || visible.some(c => !c.closed)), ...state.result.warnings];
-  $('#download').disabled = state.result.paths.length === 0;
-  if (warnings.length) notify(warnings.join(' '), 'warning');
-  else if ($('#notice').classList.contains('warning')) $('#notice').hidden = true;
 }
 
 function refreshAreaSuggestions() {
   const padding = Math.max(state.margin, Math.max(state.channelWidth, ...state.regions.map(r => r.width)) / 2 + 2);
   state.areaSuggestions = suggestAreas(state.artwork, { ...state, padding, regions: scaleRegions(state.regions, state.artworkWidth, padding), regionBridges: scaleBridges(state.regionBridges, state.artworkWidth, padding) });
   applyAreaSuggestions(state, state.artwork, state.areaSuggestions);
+  state.areaSuggestionBasis = { artworkWidth: state.artworkWidth, channelWidth: state.channelWidth, minimumMaterialWidth: state.minimumMaterialWidth };
 }
 function markAreaOverrides(ids) {
-  for (const c of state.artwork.contours) if (ids.includes(c.id)) state.areaOverrides[c.regionId] = true;
+  for (const c of state.artwork.contours) if (ids.includes(c.id)) { state.areaOverrides[c.regionId] = true; state.areaDecisions[c.regionId] = 'manual'; }
 }
 function preserveLegacyAreaChoices(saved) {
   if (saved.areaOverrides !== undefined) return;
   for (const c of state.artwork.contours) if (saved.materialTreatments?.[c.regionId] || saved.hiddenContours?.includes(c.id) || saved.cutawayContours?.includes(c.id)) state.areaOverrides[c.regionId] = true;
 }
-function uncertainAreas() {
-  return Object.entries(state.areaSuggestions?.byRegion ?? {}).filter(([id, s]) => s.confidence !== 'high' && !state.areaOverrides[id]).map(([id]) => id);
+function uncertainAreas() { return pendingTypeReviews(state); }
+function layerName(id) {
+  const regions = state.artwork.sourceRegions ?? [];
+  const source = regions.find(region => region.id === id);
+  return source?.source?.id || source?.source?.groups?.at(-1)?.id || `Layer ${[...new Set(state.artwork.contours.map(c => c.regionId))].indexOf(id) + 1}`;
 }
 function reviewUncertainArea() {
-  if (!state.editingOutlines) toggleEditing('editingOutlines');
+  activateTool('layers');
   if (!state.areaSuggestions) mutate(refreshAreaSuggestions);
-  const ids = uncertainAreas(), current = state.artwork.contours.find(c => state.selectedOutlines.includes(c.id))?.regionId;
-  const next = ids[(ids.indexOf(current) + 1) % ids.length];
-  if (next) selectOutline(state.artwork.contours.find(c => c.regionId === next).id);
-  $('#area-review-hint').textContent = next ? 'This area needs your choice. Select Keep, Cut Away, Outline or Hidden in its treatment menu. Use suggestion for selected to accept the proposed treatment, then review bridges if needed.' : 'All suggestions have been reviewed. You can still change any treatment.';
-  const contour = state.artwork.contours.find(c => c.regionId === next);
-  if (contour) $(`#select-${contour.id}`)?.scrollIntoView({ block: 'nearest' });
+  state.reviewingTypes = true;
+  const pending = uncertainAreas();
+  if (!state.reviewRegion || !pending.includes(state.reviewRegion)) state.reviewRegion = pending[0] ?? null;
+  focusReviewRegion(); render();
+  $('#type-review').scrollIntoView({ block: 'nearest' });
+}
+function focusReviewRegion() {
+  if (state.reviewRegion) state.selectedOutlines = state.artwork.contours.filter(c => c.regionId === state.reviewRegion).map(c => c.id);
+}
+function advanceTypeReview(direction = 1, unresolvedOnly = false) {
+  const ids = typeReviewIds(state), current = ids.indexOf(state.reviewRegion);
+  const remaining = uncertainAreas();
+  for (let offset = 1; offset <= ids.length; offset++) {
+    const next = ids[(current + direction * offset + ids.length * 2) % ids.length];
+    if (!unresolvedOnly || remaining.includes(next)) { state.reviewRegion = next; focusReviewRegion(); render(); return; }
+  }
+  state.reviewRegion = null; render();
+}
+function resolveTypeReview(choice, mode = null) {
+  if (!state.reviewRegion) return;
+  mutate(() => decideLayerType(state, state.reviewRegion, choice, mode));
+  announce(`${layerName(state.reviewRegion)} reviewed. ${uncertainAreas().length} remaining.`);
+  advanceTypeReview(1, true);
+  (state.reviewRegion ? $('#accept-area-suggestion') : $('#close-type-review')).focus({ preventScroll: true });
+}
+function updateTypeReview() {
+  const pending = uncertainAreas(), all = typeReviewIds(state);
+  $('#review-count').textContent = state.areaSuggestions ? pending.length ? `${pending.length} Need Review` : 'No Types Need Review' : 'Not Checked';
+  $('#review-areas').hidden = !!state.areaSuggestions && !pending.length;
+  $('#review-areas').textContent = state.areaSuggestions ? 'Review Layer Types' : 'Detect Layer Types';
+  $('#type-review').hidden = !state.reviewingTypes;
+  if (!state.reviewingTypes) return;
+  if (!state.reviewRegion && pending.length) { state.reviewRegion = pending[0]; focusReviewRegion(); }
+  if (state.reviewRegion && !all.includes(state.reviewRegion)) state.reviewRegion = pending[0] ?? null;
+  const id = state.reviewRegion, suggestion = state.areaSuggestions?.byRegion[id];
+  const members = state.artwork.contours.filter(c => c.regionId === id);
+  const hasLayer = Boolean(suggestion && members.length);
+  $('#review-layer-name').textContent = hasLayer ? layerName(id) : 'Layer Types Reviewed';
+  $('#review-thumbnail').innerHTML = hasLayer ? members.map(outlineThumbnail).join('') : '';
+  $('#review-current').textContent = hasLayer ? members.every(c => state.hiddenContours.includes(c.id)) ? `Hidden (${treatmentLabel(materialMode(members[0], state))})` : treatmentLabel(materialMode(members[0], state)) : 'All Choices Saved';
+  $('#review-suggested').textContent = hasLayer ? treatmentLabel(suggestion.mode) : 'No Remaining Choices';
+  $('#area-review-hint').textContent = hasLayer ? suggestion.reason : 'You can still change any layer type or continue to review the stencil.';
+  const progress = `${pending.length} Remaining`;
+  if ($('#review-progress').textContent !== progress) $('#review-progress').textContent = progress;
+  for (const selector of ['#accept-area-suggestion', '#keep-area-type', '#review-treatment']) $(selector).disabled = !hasLayer;
+  $('#accept-area-suggestion').textContent = suggestion?.mode === 'hidden' ? 'Hide Layer' : 'Use Suggested Type';
+  $('#accept-area-suggestion').setAttribute('aria-label', hasLayer ? `Use ${treatmentLabel(suggestion.mode)} for ${layerName(id)}` : 'Use Suggested Type');
+  $('#keep-area-type').textContent = suggestion?.mode === 'hidden' ? 'Keep Visible' : 'Keep Current Type';
+  $('.review-types').hidden = !hasLayer;
+  $('.review-decisions').hidden = !hasLayer;
+  $('#review-treatment').parentElement.hidden = !hasLayer;
+  $('#review-treatment').value = hasLayer ? materialMode(members[0], state) : 'outline';
+  for (const option of $('#review-treatment').options) option.disabled = option.value !== 'outline' && members.some(c => !c.closed);
+  $('#previous-area').disabled = !all.length;
+  $('#next-area').disabled = !all.length;
 }
 
 function visibleContours() { return state.scaled.contours.filter(c => !state.hiddenContours.includes(c.id)); }
 function channelContours() { return visibleContours().filter(c => materialMode(c, state) === 'outline'); }
 function outlineNumber(id) { return state.artwork.contours.findIndex(c => c.id === id) + 1; }
-function pointToMode(panelId, buttonId) {
-  const panel = $(`#${panelId}`), button = $(`#${buttonId}`);
-  if (panel.hidden) return;
-  const bounds = button.getBoundingClientRect();
-  panel.style.setProperty('--mode-caret-left', `${bounds.left + bounds.width / 2 - panel.getBoundingClientRect().left - parseFloat(getComputedStyle(panel).borderLeftWidth)}px`);
-}
 function renderOutlineTargets() {
-  return `<g class="outline-visibility-targets">${state.scaled.contours.map(c => {
+  return `<g class="outline-visibility-targets">${[...state.scaled.contours].sort((a, b) => state.materialOrder.indexOf(a.regionId) - state.materialOrder.indexOf(b.regionId)).map(c => {
     const hidden = state.hiddenContours.includes(c.id), selected = state.selectedOutlines.includes(c.id);
     if (hidden && !state.showHiddenOutlines) return '';
     return `<g data-visibility-outline="${c.id}" class="visibility-outline ${hidden ? 'is-hidden' : ''} ${selected ? 'selected' : ''}" tabindex="0" role="button" aria-label="Layer ${outlineNumber(c.id)}, ${hidden ? 'hidden' : 'visible'}" aria-pressed="${selected}">
@@ -262,6 +202,22 @@ function selectOutline(id, additive = false) {
   else state.selectedOutlines = materialMode(state.artwork.contours.find(c => c.id === id), state) === 'outline' ? [id] : state.artwork.contours.filter(c => c.regionId === state.artwork.contours.find(c => c.id === id).regionId).map(c => c.id);
   render();
 }
+function setLayerTypes(ids, mode) {
+  const regions = new Set(state.artwork.contours.filter(c => ids.includes(c.id)).map(c => c.regionId));
+  const members = state.artwork.contours.filter(c => regions.has(c.regionId));
+  if (!regions.size || !['outline', 'keep', 'cut'].includes(mode) || mode !== 'outline' && members.some(c => !c.closed)) return;
+  mutate(() => {
+    for (const id of regions) {
+      state.materialTreatments[id] = mode;
+      state.areaOverrides[id] = true;
+      state.areaDecisions[id] = 'manual';
+    }
+    const memberIds = new Set(members.map(c => c.id));
+    state.cutawayContours = state.cutawayContours.filter(id => !memberIds.has(id));
+    state.selectedOutlines = [...memberIds];
+  });
+  if (state.reviewingTypes && regions.has(state.reviewRegion)) advanceTypeReview(1, true);
+}
 function setOutlineVisibility(ids, visible) {
   mutate(() => {
     const hidden = new Set(state.hiddenContours);
@@ -269,6 +225,7 @@ function setOutlineVisibility(ids, visible) {
     state.hiddenContours = state.artwork.contours.filter(c => hidden.has(c.id)).map(c => c.id);
     markAreaOverrides(ids);
   });
+  if (state.reviewingTypes && state.artwork.contours.some(c => c.regionId === state.reviewRegion && ids.includes(c.id))) advanceTypeReview(1, true);
 }
 function outlineThumbnail(contour) {
   if (outlineThumbnails.has(contour)) return outlineThumbnails.get(contour);
@@ -282,53 +239,55 @@ function outlineThumbnail(contour) {
   return thumbnail;
 }
 function updateOutlineEditor() {
-  $('#edit-outlines').textContent = state.editingOutlines ? 'Done editing' : 'Edit layers';
+  $('#edit-outlines').textContent = 'Layers';
   $('#edit-outlines').setAttribute('aria-pressed', state.editingOutlines);
-  $('#edit-outlines').setAttribute('aria-expanded', state.editingOutlines);
   $('#outline-inspector').hidden = !state.editingOutlines;
-  $('#outline-count').textContent = `${visibleContours().length} of ${state.scaled.contours.length} visible`;
+  const groups = [...new Set([...state.materialOrder, ...state.artwork.contours.map(c => c.regionId)])].filter(id => state.artwork.contours.some(c => c.regionId === id)).reverse();
+  const shown = groups.filter(id => state.artwork.contours.some(c => c.regionId === id && !state.hiddenContours.includes(c.id)));
+  $('#outline-count').textContent = `${shown.length} of ${groups.length} Visible`;
   $('#show-hidden-outlines').checked = state.showHiddenOutlines;
   const selected = state.selectedOutlines;
   $('#hide-outlines').disabled = !selected.some(id => !state.hiddenContours.includes(id));
   $('#show-outlines').disabled = !selected.some(id => state.hiddenContours.includes(id));
   $('#keep-only-outlines').disabled = selected.length === 0;
   $('#show-all-outlines').disabled = state.hiddenContours.length === 0;
-  const uncertain = uncertainAreas();
-  $('#review-areas').textContent = state.areaSuggestions ? `Review uncertain (${uncertain.length})` : 'Suggest area treatments';
-  $('#accept-area-suggestion').disabled = !selected.some(id => state.areaSuggestions?.byRegion[state.artwork.contours.find(c => c.id === id)?.regionId]);
-  // Retain the list DOM across unrelated renders (including viewport resizing).
+  $('#layer-selection-actions').hidden = !selected.length;
+  $('#layer-selection-controls').hidden = !selected.length;
+  const selectedRegions = new Set(state.artwork.contours.filter(c => selected.includes(c.id)).map(c => c.regionId));
+  const selectedMembers = state.artwork.contours.filter(c => selectedRegions.has(c.regionId));
+  const selectedModes = new Set(selectedMembers.map(c => materialMode(c, state)));
+  $('#selected-layer-count').textContent = `${selectedRegions.size} ${selectedRegions.size === 1 ? 'Layer' : 'Layers'} Selected`;
+  $('#selected-layer-treatment').value = selectedModes.size === 1 ? [...selectedModes][0] : '';
+  for (const option of $('#selected-layer-treatment').options) if (option.value) option.disabled = option.value !== 'outline' && selectedMembers.some(c => !c.closed);
+  updateTypeReview();
+  const filtered = Boolean(state.layerQuery || state.layerFilter !== 'all');
+  $('#layer-reorder-hint').hidden = !filtered;
   const list = $('#outline-list');
-  const key = JSON.stringify([state.hiddenContours, state.cutawayContours, state.materialTreatments, state.materialOrder, state.areaSuggestions, state.areaOverrides, selected]);
+  const key = JSON.stringify([state.hiddenContours, state.cutawayContours, state.materialTreatments, state.materialOrder, state.areaSuggestions, state.areaOverrides, state.areaDecisions, selected, state.layerQuery, state.layerFilter]);
   if (list.artwork !== state.artwork || list.visibilityKey !== key) {
     const focus = list.contains(document.activeElement) ? document.activeElement.id : null;
-    const stackingOrder = [...new Set([...state.materialOrder, ...state.artwork.contours.map(c => c.regionId)])];
-    const sourceOrder = [...new Set(state.artwork.contours.map(c => c.regionId))];
-    list.innerHTML = [...stackingOrder].reverse().map((regionId, position) => {
-      const members = state.artwork.contours.filter(c => c.regionId === regionId);
-      if (!members.length) return '';
-      const c = members[0], mode = members.every(c => state.hiddenContours.includes(c.id)) ? 'hidden' : materialMode(c, state), compound = members.length > 1;
-      const layerLabel = `Layer ${sourceOrder.indexOf(regionId) + 1}`;
-      const suggestion = state.areaSuggestions?.byRegion[regionId];
-      const suggestionNote = suggestion ? `<div class="area-suggestion ${suggestion.confidence === 'high' ? '' : 'needs-review'}"><span class="suggestion-badge">Suggested: ${treatmentLabel(suggestion.mode)} · ${suggestion.confidence} confidence${state.areaOverrides[regionId] ? ' · Manual choice' : ''}</span><span>${htmlText(suggestion.reason)}</span></div>` : '';
-      const controls = `<label class="treatment-label"><select id="treatment-${c.id}" data-treatment-outline="${c.id}" aria-label="${layerLabel} treatment"><option value="outline" ${mode === 'outline' ? 'selected' : ''}>Outline</option><option value="keep" ${mode === 'keep' ? 'selected' : ''} ${members.every(m => m.closed) ? '' : 'disabled'}>Keep</option><option value="cut" ${mode === 'cut' ? 'selected' : ''} ${members.every(m => m.closed) ? '' : 'disabled'}>Cut Away</option><option value="hidden" ${mode === 'hidden' ? 'selected' : ''}>Hidden</option></select></label>
-        <span class="material-order"><button class="small-button" data-material-move="${regionId}" data-direction="1" aria-label="Move ${layerLabel} up" ${position <= 0 ? 'disabled' : ''}>Up</button><button class="small-button" data-material-move="${regionId}" data-direction="-1" aria-label="Move ${layerLabel} down" ${position === stackingOrder.length - 1 ? 'disabled' : ''}>Down</button></span>`;
-      const rows = members.map((contour, index) => {
-        const hidden = state.hiddenContours.includes(contour.id), active = selected.includes(contour.id);
-        const label = compound ? `Contour ${index + 1}` : layerLabel;
-        return `<div class="outline-row ${compound ? 'contour-child' : ''} ${active ? 'selected' : ''} ${hidden ? 'is-hidden' : ''}">
-          <button id="select-${contour.id}" class="outline-select" data-select-outline="${contour.id}" aria-label="Select ${layerLabel}${compound ? ` contour ${index + 1}` : ''}" aria-pressed="${active}">${outlineThumbnail(contour)}<span>${label}<small>${hidden ? 'Hidden' : 'Visible'} · ${contour.closed ? 'Closed' : 'Open'}</small></span></button>
-          ${compound ? '' : controls}
-          <label class="check-label"><input id="visible-${contour.id}" type="checkbox" data-visible-outline="${contour.id}" aria-label="${layerLabel}${compound ? ` contour ${index + 1}` : ''} visible" ${hidden ? '' : 'checked'} /><span>Visible</span></label>
-        </div>`;
-      }).join('');
-      return compound ? `<section class="compound-layer" aria-label="${layerLabel}, ${members.length} contours"><div class="layer-heading"><div class="layer-group-title"><strong>${layerLabel}</strong><small>${members.length} contours · shared treatment and order</small></div>${controls}</div>${suggestionNote}<div class="contour-children">${rows}</div></section>` : `<div class="suggested-layer">${rows}${suggestionNote}</div>`;
-    }).join('');
-    list.artwork = state.artwork; list.visibilityKey = key;
+    const openGroups = new Set([...list.querySelectorAll('details.compound-children[open]')].map(el => el.dataset.group));
+    const scroll = list.scrollTop;
+    list.innerHTML = groups.map((regionId, position) => {
+      const members = state.artwork.contours.filter(c => c.regionId === regionId), c = members[0];
+      const label = htmlText(layerName(regionId)), compound = members.length > 1;
+      const active = members.some(c => selected.includes(c.id));
+      const hidden = members.every(c => state.hiddenContours.includes(c.id));
+      const pending = uncertainAreas().includes(regionId);
+      if (state.layerQuery && !layerName(regionId).toLowerCase().includes(state.layerQuery.toLowerCase()) || state.layerFilter === 'selected' && !active || state.layerFilter === 'review' && !pending) return '';
+      const mode = materialMode(c, state), suggestion = state.areaSuggestions?.byRegion[regionId];
+      const status = pending ? 'Needs Review' : state.areaDecisions[regionId] && state.areaDecisions[regionId] !== 'manual' ? 'Reviewed' : state.areaOverrides[regionId] ? 'Manual' : 'Automatic';
+      const controls = orderControls(`layer-${regionId}`, label, position, groups.length, filtered);
+      const children = compound ? `<details class="compound-children" data-group="${regionId}" ${openGroups.has(regionId) ? 'open' : ''}><summary>${members.length} Contours</summary>${members.map((contour, index) => `<div class="contour-child"><button id="select-${contour.id}" data-select-outline="${contour.id}" aria-pressed="${selected.includes(contour.id)}">Contour ${index + 1}</button><label class="check-label"><input id="visible-${contour.id}" type="checkbox" data-visible-outline="${contour.id}" aria-label="Show ${label} Contour ${index + 1}" ${state.hiddenContours.includes(contour.id) ? '' : 'checked'} />Visible</label></div>`).join('')}</details>` : '';
+      return `<section class="layer-card ${compound ? 'compound-layer' : ''} ${active ? 'selected' : ''} ${hidden ? 'is-hidden' : ''}" role="listitem" data-order-id="${regionId}" data-order-label="${label}">
+        <div class="layer-main">${controls}<button ${compound ? '' : `id="select-${c.id}"`} class="outline-select" data-select-outline="${c.id}" aria-label="Select ${label}" aria-pressed="${active}">${outlineThumbnail(c)}<span>${label}<small class="${pending ? 'needs-review' : ''}">${status}</small></span></button><label class="visibility-toggle" title="${hidden ? 'Show' : 'Hide'} ${label}"><input ${compound ? '' : `id="visible-${c.id}"`} type="checkbox" data-visible-layer="${regionId}" ${compound ? '' : `data-visible-outline="${c.id}"`} aria-label="${hidden ? 'Show' : 'Hide'} ${label}" ${hidden ? '' : 'checked'} /><span aria-hidden="true">${icon('eye')}</span></label></div>
+        <label class="layer-treatment" for="treatment-${c.id}"><span>Layer Type</span><select id="treatment-${c.id}" data-treatment-outline="${c.id}" aria-label="${label} Type">${[['outline', 'Outline'], ['keep', 'Keep'], ['cut', 'Cut Away']].map(([value, text]) => `<option value="${value}" ${mode === value ? 'selected' : ''} ${value !== 'outline' && members.some(m => !m.closed) ? 'disabled' : ''}>${text}</option>`).join('')}</select></label>
+        ${children}<details class="layer-explanation"><summary>Type Details</summary><div class="area-suggestion"><strong>${status}</strong>${suggestion ? `<span>Suggested Type: ${treatmentLabel(suggestion.mode)}</span><span>${htmlText(suggestion.reason)}</span><span>Confidence: ${suggestion.confidence}</span>` : '<span>Choose a layer type to control its treatment.</span>'}</div></details>
+      </section>`;
+    }).join('') || '<p class="empty-state">No layers match this filter.</p>';
+    list.artwork = state.artwork; list.visibilityKey = key; list.scrollTop = scroll;
     if (focus) document.getElementById(focus)?.focus({ preventScroll: true });
   }
-  pointToMode('outline-inspector', 'edit-outlines');
-  pointToMode('tab-inspector', 'edit-tabs');
-  pointToMode('region-inspector', 'edit-regions');
 }
 
 function fitSheet() {
@@ -406,22 +365,24 @@ function updateTabEditor() {
   const contours = channelContours();
   const automatic = contours.filter(c => !Object.hasOwn(state.tabLayouts, c.id)).length;
   const custom = contours.length - automatic;
-  $('#automatic-scope').textContent = `Placement applies to ${automatic} automatic layer${automatic === 1 ? '' : 's'} · ${custom} custom. Default width applies unless overridden.`;
+  $('#automatic-scope').textContent = `Placement affects ${automatic} automatic outline${automatic === 1 ? '' : 's'}. ${custom} custom. Each contour in a compound layer gets its own count.`;
   for (const id of ['tabCount', 'tabOffset', 'tabs-minus', 'tabs-plus']) $(`#${id}`).disabled = automatic === 0;
   $('#reset-all-tabs').disabled = Object.keys(state.tabLayouts).length === 0;
-  $('#edit-tabs').textContent = state.editing ? 'Done editing' : 'Edit tabs';
+  $('#edit-tabs').textContent = 'Tabs';
   $('#edit-tabs').setAttribute('aria-pressed', state.editing);
   $('#edit-tabs').setAttribute('aria-expanded', state.editing);
-  $('#edit-tabs').disabled = contours.length === 0;
+  $('#edit-tabs').disabled = false;
+  $('#tabs-unavailable').hidden = contours.length > 0;
+  $('#tabs-available').hidden = contours.length === 0;
   $('#add-tab').hidden = !state.editing;
   $('#add-tab').setAttribute('aria-pressed', state.adding);
-  $('#add-tab').textContent = state.adding ? 'Done adding' : 'Add tab';
+  $('#add-tab').textContent = state.adding ? 'Finish Adding' : 'Add Tab';
   $('#edit-hint').hidden = !state.editing;
-  $('#edit-hint').textContent = state.adding ? 'Click layers to keep adding tabs at the previewed positions. Click Done adding or press Escape to finish.' : `Drag a tab along its layer to move it. Drag empty space to select tabs ${state.selectCurrentOutlineOnly ? 'on the current layer' : 'across layers'}; Shift adds to the selection. Width applies to all selected tabs; position moves them together.`;
+  $('#edit-hint').textContent = state.adding ? 'Click layers to keep adding tabs at the previewed positions. Choose Finish Adding or press Escape to finish.' : 'Drag tabs to move them. Drag empty space to select a group; Shift adds to the selection.';
   $('#tab-inspector').hidden = !state.editing;
-  $('#show-tabs').disabled = state.editing || state.editingOutlines;
-  $('#show-tabs').checked = !state.editingOutlines && (state.editing || state.showTabs);
-  $('#outline-picker').innerHTML = contours.map(c => `<option value="${c.id}">Layer ${outlineNumber(c.id)} · ${Object.hasOwn(state.tabLayouts, c.id) ? 'Custom' : 'Automatic'}</option>`).join('');
+  $('#show-tabs').disabled = false;
+  $('#show-tabs').checked = state.showTabs;
+  $('#outline-picker').innerHTML = contours.map(c => `<option value="${c.id}">${htmlText(layerName(c.regionId))}${state.artwork.contours.filter(member => member.regionId === c.regionId).length > 1 ? `, Contour ${state.artwork.contours.filter(member => member.regionId === c.regionId).indexOf(c) + 1}` : ''} (${Object.hasOwn(state.tabLayouts, c.id) ? 'Custom' : 'Automatic'})</option>`).join('');
   const contour = selectedContour();
   if (!contour) return;
   const isCustom = Object.hasOwn(state.tabLayouts, contour.id);
@@ -431,21 +392,23 @@ function updateTabEditor() {
   $('#outline-mode-hint').textContent = isCustom ? 'Custom placement is preserved. Widths follow the default unless overridden.' : 'Editing a tab makes this layer custom and preserves its placement.';
   $('#outline-picker').value = contour.id;
   const tabs = state.result.bridges.filter(b => b.contourId === contour.id);
-  $('#tab-picker').innerHTML = '<option value="">Select a tab…</option>' + tabs.map((b, i) => `<option value="${b.id}">Tab ${i + 1} · ${b.width.toFixed(1)} mm${b.widthOverride == null ? ' · Default' : ' · Override'}</option>`).join('');
+  $('#tab-picker').innerHTML = '<option value="">Select a tab…</option>' + tabs.map((b, i) => `<option value="${b.id}">Tab ${i + 1} (${b.width.toFixed(1)} mm, ${b.widthOverride == null ? 'Default' : 'Override'})</option>`).join('');
   $('#tab-picker').value = state.selectedTab ?? '';
   const bridge = selectedBridge();
   const selection = selectedBridges();
   const multiple = selection.length > 1;
-  $('#remove-tab').textContent = multiple ? 'Remove selected tabs' : 'Remove selected tab';
-  $('label[for="selected-tab-position"]').textContent = multiple ? 'Position (move group)' : 'Position';
+  $('#remove-tab').textContent = multiple ? 'Remove Selected Tabs' : 'Remove Tab';
+  $('label[for="selected-tab-position"]').textContent = multiple ? 'Position (Move Group)' : 'Position';
   $('#selected-tab-controls').hidden = !bridge;
+  $('#selected-tab-actions').hidden = !bridge;
   $('#tab-empty-state').hidden = !!bridge;
   $('#remove-tab').disabled = !bridge;
   $('#inherit-tab-width').disabled = !bridge || bridge.widthOverride == null;
   $('#tab-inspector').classList.toggle('has-selection', !!bridge);
-  $('#selected-outline-label').textContent = multiple ? `${selection.length} tabs selected` : bridge ? `Selected tab · Layer ${number} · Tab ${tabs.indexOf(bridge) + 1}` : `Tab editing · Layer ${number}`;
+  $('#selected-outline-label').textContent = multiple ? `${selection.length} Tabs Selected` : bridge ? `Layer ${number}, Tab ${tabs.indexOf(bridge) + 1}` : `Layer ${number}`;
   if (bridge) {
-    $('#selected-tab-width').value = bridge.requestedWidth;
+    $('#selected-tab-width').value = selection.some(tab => tab.requestedWidth !== bridge.requestedWidth) ? '' : bridge.requestedWidth;
+    $('#selected-tab-width').placeholder = 'Mixed';
     $('#selected-tab-width-range').value = bridge.requestedWidth;
     $('#selected-tab-position').value = Number((bridge.position * 100).toFixed(2));
     $('#selected-tab-position-range').value = $('#selected-tab-position').value;
@@ -504,6 +467,7 @@ const simplifyEditor = createSimplifyEditor({
       state.tabLayouts = {}; state.hiddenContours = []; state.cutawayContours = []; state.regions = [];
       Object.assign(state, materialDefaults()); bridgeEditor.cancel(); state.selectedRegionBridge = null; state.selectedRegionBridges = [];
       refreshAreaSuggestions();
+      state.reviewingTypes = false; state.reviewRegion = null;
       state.selectedRegion = null; state.drawingRegion = false; state.regionDraft = [];
       state.selectedOutlines = []; state.selectedTabs = []; state.selectedContour = artwork.contours[0].id; state.selectedTab = null;
       state.adding = false;
@@ -513,61 +477,61 @@ const simplifyEditor = createSimplifyEditor({
   },
 });
 $('#simplify-artwork').addEventListener('click', () => simplifyEditor.open());
-function toggleEditing(mode) {
-  bridgeEditor.finishGesture();
-  regionEditor.finishGesture();
-  if (drag) finishDrag({ pointerId: drag.pointerId }, true);
-  commitSettings(); clearGhost();
-  const enabled = !state[mode];
-  state.editing = mode === 'editing' && enabled;
-  state.editingOutlines = mode === 'editingOutlines' && enabled;
-  state.editingRegions = mode === 'editingRegions' && enabled;
-  state.editingBridges = mode === 'editingBridges' && enabled;
-  if (state.editingRegions && !state.selectedRegion && !state.drawingRegion) state.regionScope = state.selectedOutlines[0] ?? state.selectedContour ?? 'all';
-  state.adding = false;
-  render();
+const toolModes = { layers: 'editingOutlines', tabs: 'editing', bridges: 'editingBridges', regions: 'editingRegions' };
+function syncEditingFlags() {
+  for (const [tool, flag] of Object.entries(toolModes)) state[flag] = state.workflowStep === 2 && state.activeTool === tool;
 }
-$('#edit-regions').addEventListener('click', () => toggleEditing('editingRegions'));
-$('#edit-bridges').addEventListener('click', () => toggleEditing('editingBridges'));
-$('#edit-tabs').addEventListener('click', () => toggleEditing('editing'));
-$('#edit-outlines').addEventListener('click', () => toggleEditing('editingOutlines'));
+function navigateStep(step) {
+  if (![1, 2, 3].includes(step)) return;
+  layerOrdering.cancel(); regionOrdering.cancel();
+  commitWorkspaceEdits(); clearGhost();
+  bridgeEditor.cancel(); state.adding = false;
+  state.workflowStep = step; state.controlsCollapsed = false;
+  syncEditingFlags(); render(); queueWorkspaceSave();
+}
+function activateTool(tool) {
+  if (!(tool in toolModes)) return;
+  if (state.workflowStep === 2 && state.activeTool === tool) return;
+  layerOrdering.cancel(); regionOrdering.cancel();
+  commitWorkspaceEdits(); clearGhost(); bridgeEditor.cancel();
+  state.workflowStep = 2; state.activeTool = tool; state.controlsCollapsed = false; state.adding = false;
+  if (tool === 'regions' && !state.selectedRegion && !state.drawingRegion) state.regionScope = state.selectedOutlines[0] ?? state.selectedContour ?? 'all';
+  syncEditingFlags(); render(); queueWorkspaceSave();
+}
+function announce(message) { $('#announcements').textContent = message; }
+for (const [tool, id] of Object.entries({ layers: 'edit-outlines', tabs: 'edit-tabs', bridges: 'edit-bridges', regions: 'edit-regions' })) $(`#${id}`).addEventListener('click', () => activateTool(tool));
+document.querySelectorAll('[data-step]').forEach(button => button.addEventListener('click', () => navigateStep(Number(button.dataset.step))));
+$('#step-next').addEventListener('click', () => navigateStep(state.workflowStep + 1));
+$('#step-back').addEventListener('click', () => navigateStep(state.workflowStep - 1));
+$('#toggle-controls').addEventListener('click', () => { state.controlsCollapsed = !state.controlsCollapsed; updateWorkspaceUI(state); queueWorkspaceSave(); });
+document.addEventListener('click', event => {
+  const tool = event.target.closest('[data-open-tool]');
+  if (tool) activateTool(tool.dataset.openTool);
+  if (event.target.closest('[data-review-types]')) reviewUncertainArea();
+});
 $('#review-areas').addEventListener('click', reviewUncertainArea);
+$('#close-type-review').addEventListener('click', () => { state.reviewingTypes = false; render(); $('#review-areas').hidden ? $('#outline-inspector h2').focus() : $('#review-areas').focus(); });
+$('#next-area').addEventListener('click', () => advanceTypeReview(1));
+$('#previous-area').addEventListener('click', () => advanceTypeReview(-1));
+$('#accept-area-suggestion').addEventListener('click', () => resolveTypeReview('accepted'));
+$('#keep-area-type').addEventListener('click', () => resolveTypeReview('kept'));
+$('#review-treatment').addEventListener('change', event => resolveTypeReview('manual', event.target.value));
 $('#apply-area-suggestions').addEventListener('click', () => mutate(refreshAreaSuggestions));
 $('#use-all-outlines').addEventListener('click', () => mutate(() => {
   state.materialTreatments = {}; state.hiddenContours = []; state.cutawayContours = [];
   markAreaOverrides(state.artwork.contours.map(c => c.id));
 }));
-$('#accept-area-suggestion').addEventListener('click', () => mutate(() => {
-  const ids = [...new Set(state.artwork.contours.filter(c => state.selectedOutlines.includes(c.id)).map(c => c.regionId))];
-  const subset = { byRegion: Object.fromEntries(ids.map(id => [id, state.areaSuggestions.byRegion[id]])) };
-  const target = { ...state, areaOverrides: {} };
-  applyAreaSuggestions(target, state.artwork, subset, { includeUncertain: true });
-  state.materialTreatments = target.materialTreatments; state.hiddenContours = target.hiddenContours; state.cutawayContours = target.cutawayContours;
-  markAreaOverrides(state.selectedOutlines);
-}));
+$('#layer-search').addEventListener('input', event => { state.layerQuery = event.target.value; updateOutlineEditor(); });
+$('#layer-filter').addEventListener('change', event => { state.layerFilter = event.target.value; updateOutlineEditor(); });
+$('#clear-layer-filter').addEventListener('click', () => { state.layerQuery = ''; state.layerFilter = 'all'; $('#layer-search').value = ''; $('#layer-filter').value = 'all'; updateOutlineEditor(); });
+const layerOrdering = createOrderedList({ element: $('#outline-list'), getIds: () => [...new Set([...state.materialOrder, ...state.artwork.contours.map(c => c.regionId)])].reverse(), disabled: () => Boolean(state.layerQuery || state.layerFilter !== 'all'), commit: ids => mutate(() => { state.materialOrder = [...ids].reverse(); }), announce });
+const regionOrdering = createOrderedList({ element: $('#region-list'), getIds: () => state.regions.map(region => region.id).reverse(), disabled: () => state.drawingRegion, commit: ids => mutate(() => { state.regions = [...ids].reverse().map(id => state.regions.find(region => region.id === id)); }), announce });
 $('#outline-list').addEventListener('click', e => {
-  const move = e.target.closest('[data-material-move]');
-  if (move) return mutate(() => {
-    const order = [...new Set([...state.materialOrder, ...state.artwork.contours.map(c => c.regionId)])];
-    const index = order.indexOf(move.dataset.materialMove), next = index + Number(move.dataset.direction);
-    if (next >= 0 && next < order.length) [order[index], order[next]] = [order[next], order[index]];
-    state.materialOrder = order;
-  });
   const button = e.target.closest('[data-select-outline]');
   if (button) selectOutline(button.dataset.selectOutline, e.shiftKey);
 });
 $('#outline-list').addEventListener('change', e => {
-  if (e.target.matches('[data-treatment-outline]')) mutate(() => {
-    const contour = state.artwork.contours.find(c => c.id === e.target.dataset.treatmentOutline);
-    const members = state.artwork.contours.filter(c => c.regionId === contour.regionId);
-    if (!['outline', 'hidden', 'keep', 'cut'].includes(e.target.value) || ['keep', 'cut'].includes(e.target.value) && members.some(c => !c.closed)) return;
-    state.materialTreatments[contour.regionId] = e.target.value === 'hidden' ? 'outline' : e.target.value;
-    state.hiddenContours = state.hiddenContours.filter(id => !members.some(c => c.id === id));
-    if (e.target.value === 'hidden') state.hiddenContours.push(...members.map(c => c.id));
-    state.areaOverrides[contour.regionId] = true;
-    state.cutawayContours = state.cutawayContours.filter(id => !members.some(c => c.id === id));
-    state.selectedOutlines = members.map(c => c.id);
-  });
+  if (e.target.matches('[data-treatment-outline]')) setLayerTypes([e.target.dataset.treatmentOutline], e.target.value);
   if (e.target.matches('[data-cutaway-outline]')) mutate(() => {
     const cutaways = new Set(state.cutawayContours);
     if (e.target.checked) cutaways.add(e.target.dataset.cutawayOutline);
@@ -575,12 +539,15 @@ $('#outline-list').addEventListener('change', e => {
     state.cutawayContours = state.artwork.contours.filter(c => c.closed && cutaways.has(c.id)).map(c => c.id);
     markAreaOverrides([e.target.dataset.cutawayOutline]);
   });
+  if (e.target.matches('[data-visible-layer]')) return setOutlineVisibility(state.artwork.contours.filter(c => c.regionId === e.target.dataset.visibleLayer).map(c => c.id), e.target.checked);
   if (e.target.matches('[data-visible-outline]')) setOutlineVisibility([e.target.dataset.visibleOutline], e.target.checked);
 });
+$('#selected-layer-treatment').addEventListener('change', e => setLayerTypes(state.selectedOutlines, e.target.value));
 $('#show-hidden-outlines').addEventListener('change', e => { state.showHiddenOutlines = e.target.checked; render(); });
 $('#hide-outlines').addEventListener('click', () => setOutlineVisibility(state.selectedOutlines, false));
 $('#show-outlines').addEventListener('click', () => setOutlineVisibility(state.selectedOutlines, true));
 $('#show-all-outlines').addEventListener('click', () => setOutlineVisibility(state.hiddenContours, true));
+$('#recover-layers').addEventListener('click', () => setOutlineVisibility(state.hiddenContours, true));
 $('#keep-only-outlines').addEventListener('click', () => mutate(() => {
   state.hiddenContours = state.artwork.contours.filter(c => !state.selectedOutlines.includes(c.id)).map(c => c.id);
   markAreaOverrides(state.artwork.contours.map(c => c.id));
@@ -639,7 +606,7 @@ function showGhost(event) {
   ghost.setAttribute('stroke', '#258477'); ghost.setAttribute('stroke-width', '2'); ghost.setAttribute('vector-effect', 'non-scaling-stroke'); ghost.setAttribute('pointer-events', 'none');
   $('#preview-svg').append(ghost);
 }
-let drag = null;
+let drag = null, suppressOutlineClick = false;
 const preview = $('#preview-svg');
 const previewPan = createPreviewPan({
   viewport: $('#canvas-viewport'), button: $('#pan-preview'),
@@ -658,7 +625,18 @@ function drawSelectionBox(start, end) {
   preview.append(rect);
 }
 preview.addEventListener('pointerdown', e => {
-  if (!state.editing || e.button !== 0 || drag) return;
+  if (e.button !== 0 || drag) return;
+  if (state.editingOutlines) {
+    suppressOutlineClick = false;
+    commitSettings();
+    drag = { kind: 'layers', pointerId: e.pointerId, x: e.clientX, y: e.clientY, start: svgPoint(e), moved: false,
+      outlineId: e.target.closest('[data-visibility-outline]')?.dataset.visibilityOutline, additive: e.shiftKey,
+      previousSelection: [...state.selectedOutlines], previous: e.shiftKey ? [...state.selectedOutlines] : [] };
+    if (e.isTrusted) preview.setPointerCapture(e.pointerId);
+    e.preventDefault();
+    return;
+  }
+  if (!state.editing) return;
   if (state.adding) {
     const nearest = nearestOutline(e);
     if (nearest) { e.preventDefault(); addTab(nearest.contour.id, nearest.position); showGhost(e); }
@@ -684,6 +662,7 @@ preview.addEventListener('pointerdown', e => {
 });
 preview.addEventListener('click', e => {
   if (state.editingOutlines) {
+    if (suppressOutlineClick && e.detail !== 0) { suppressOutlineClick = false; return; }
     const outline = e.target.closest('[data-visibility-outline]');
     selectOutline(outline?.dataset.visibilityOutline, e.shiftKey);
     return;
@@ -699,7 +678,15 @@ preview.addEventListener('pointermove', e => {
   if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 3) return;
   const point = svgPoint(e); if (!point) return;
   drag.moved = true;
-  if (drag.kind === 'box') {
+  if (drag.kind === 'layers') {
+    const left = Math.min(drag.start.x, point.x), right = Math.max(drag.start.x, point.x);
+    const top = Math.min(drag.start.y, point.y), bottom = Math.max(drag.start.y, point.y);
+    // A contour enclosed by the rectangle selects its whole source layer.
+    const regions = new Set(state.scaled.contours.filter(c => (state.showHiddenOutlines || !state.hiddenContours.includes(c.id)) &&
+      c.points.length && c.points.every(p => p.x >= left && p.x <= right && p.y >= top && p.y <= bottom)).map(c => c.regionId));
+    state.selectedOutlines = [...new Set([...drag.previous, ...state.scaled.contours.filter(c => regions.has(c.regionId)).map(c => c.id)])];
+    render(); drawSelectionBox(drag.start, point);
+  } else if (drag.kind === 'box') {
     const start = drag.start;
     const inside = state.result.bridges.filter(b => (!drag.selectionContour || b.contourId === drag.selectionContour) && b.point.x >= Math.min(start.x, point.x) && b.point.x <= Math.max(start.x, point.x) && b.point.y >= Math.min(start.y, point.y) && b.point.y <= Math.max(start.y, point.y));
     state.selectedTabs = [...drag.previous];
@@ -721,7 +708,12 @@ function finishDrag(event, cancelled = false) {
   if (!drag || drag.pointerId !== event.pointerId) return;
   const finished = drag; drag = null;
   $('#tab-selection-box')?.remove();
-  if (cancelled && finished.moved) restore(finished.before);
+  if (finished.kind === 'layers') {
+    suppressOutlineClick = true;
+    if (cancelled) { state.selectedOutlines = finished.previousSelection; render(); }
+    else if (finished.moved) queueWorkspaceSave();
+    else selectOutline(finished.outlineId, finished.additive);
+  } else if (cancelled && finished.moved) restore(finished.before);
   else if (finished.moved && finished.kind === 'tabs') history.record(finished.before);
   if (preview.hasPointerCapture(event.pointerId)) preview.releasePointerCapture(event.pointerId);
 }
@@ -791,10 +783,13 @@ document.addEventListener('keydown', e => {
 function loadSource(source, name, example = '') {
   try {
     const artwork = importSvg(source);
+    state.sourceChosen = Boolean(state.source);
+    state.workflowStep = 1;
     bridgeEditor.cancel(); Object.assign(state, materialDefaults()); state.selectedRegionBridge = null; state.selectedRegionBridges = [];
     cancelAnimationFrame(renderFrame);
     state.artwork = artwork; state.source = source; state.example = example; state.name = name; state.sourceWarnings = artwork.warnings; state.zoom = 1; state.panX = state.panY = 0; previewPan.reset();
     state.tabLayouts = {}; state.hiddenContours = []; state.cutawayContours = []; state.regions = []; state.selectedRegion = null; state.drawingRegion = false; state.regionDraft = []; state.selectedOutlines = []; state.selectedTabs = []; state.selectedContour = artwork.contours[0].id; state.selectedTab = null; state.adding = false;
+    state.reviewingTypes = false; state.reviewRegion = null; state.layerQuery = ''; state.layerFilter = 'all'; $('#layer-search').value = ''; $('#layer-filter').value = 'all';
     refreshAreaSuggestions();
     if (examples[example]?.treatments) {
       state.materialTreatments = structuredClone(examples[example].treatments);
@@ -802,6 +797,7 @@ function loadSource(source, name, example = '') {
     }
     history.clear(); pendingSettings = null;
     $('#filename').textContent = name;
+    $('#notice').hidden = true;
     document.querySelectorAll('[data-example]').forEach(b => b.classList.toggle('active', b.dataset.example === example));
     render();
   } catch (error) { notify(error.message, 'error'); }
@@ -821,7 +817,7 @@ $('#upload').addEventListener('dragleave', () => $('#upload').classList.remove('
 $('#upload').addEventListener('drop', e => { e.preventDefault(); $('#upload').classList.remove('dragging'); readFile(e.dataTransfer.files[0]); });
 // Prevent dropped files from navigating away from the editor.
 window.addEventListener('dragover', e => e.preventDefault());
-window.addEventListener('drop', e => e.preventDefault());
+window.addEventListener('drop', e => { e.preventDefault(); if (!e.target.closest('#upload') && e.dataTransfer?.files.length) readFile(e.dataTransfer.files[0]); });
 document.querySelectorAll('[data-example]').forEach(b => b.addEventListener('click', () => { const example = examples[b.dataset.example]; loadSource(example.svg, example.name, b.dataset.example); }));
 
 let renderFrame;
@@ -860,7 +856,7 @@ function restore(saved) {
   for (const [key, value] of Object.entries(materialDefaults())) state[key] = structuredClone(saved[key] ?? value);
   preserveLegacyAreaChoices(saved);
   state.selectedRegionBridge = null; state.selectedRegionBridges = [];
-  state.regions = structuredClone(saved.regions ?? []);
+  state.regions = structuredClone(saved.regions ?? []).map((region, index) => ({ ...region, label: region.label ?? `Region ${index + 1}` }));
   state.drawingRegion = false; state.regionDraft = [];
   state.selectedTab = null;
   syncSettingInputs(); render(); updateHistoryButtons();
@@ -920,6 +916,7 @@ $('#reset').addEventListener('click', () => { mutate(() => { Object.assign(state
 $('#undo').addEventListener('click', () => { bridgeEditor.finishGesture(); regionEditor.finishGesture(); commitSettings(); history.undo(); });
 $('#redo').addEventListener('click', () => { bridgeEditor.finishGesture(); regionEditor.finishGesture(); history.redo(); });
 $('#show-tabs').addEventListener('change', e => { state.showTabs = e.target.checked; render(); });
+$('#show-bridges').addEventListener('change', e => { state.showBridges = e.target.checked; render(); });
 $('#show-original').addEventListener('change', e => { state.showOriginal = e.target.checked; render(); });
 for (const mode of ['material', 'cut']) $(`#${mode}-view`).addEventListener('click', () => {
   state.view = mode;
@@ -935,6 +932,7 @@ function downloadFile(data, type, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 $('#download').addEventListener('click', () => {
+  commitWorkspaceEdits();
   if (!state.result?.paths.length) return;
   const data = exportSvg(state.result, state.scaled.width, state.scaled.height, state.name.replace(/\.svg$/i, '') + ' stencil');
   downloadFile(data, 'image/svg+xml', state.name.replace(/\.svg$/i, '') + '-stencil.svg');
@@ -951,16 +949,6 @@ $('#help').addEventListener('click', () => $('#help-dialog').showModal());
 for (const id of ['close-help', 'got-it']) $(`#${id}`).addEventListener('click', () => $('#help-dialog').close());
 $('#help-dialog').addEventListener('click', e => { if (e.target === $('#help-dialog')) { const r = e.target.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) e.target.close(); } });
 new ResizeObserver(scheduleRender).observe($('#canvas-viewport'));
-function updateModeCarets() {
-  pointToMode('outline-inspector', 'edit-outlines');
-  pointToMode('tab-inspector', 'edit-tabs');
-  pointToMode('region-inspector', 'edit-regions');
-  pointToMode('bridge-inspector', 'edit-bridges');
-}
-const modeObserver = new ResizeObserver(updateModeCarets);
-for (const id of ['edit-tabs', 'edit-outlines', 'edit-regions', 'edit-bridges', 'tab-inspector', 'outline-inspector', 'region-inspector', 'bridge-inspector']) modeObserver.observe($(`#${id}`));
-window.addEventListener('resize', updateModeCarets);
-document.fonts.ready.then(updateModeCarets);
 let workspaceSaveTimer;
 let storageWarningShown = false;
 updateRangePaint();
@@ -979,7 +967,7 @@ function queueWorkspaceSave() {
 function captureWorkspace() {
   const ui = Object.fromEntries(['view', 'showTabs', 'showOriginal', 'zoom', 'panX', 'panY', 'editing', 'adding', 'selectedContour', 'selectedTab', 'selectedTabs', 'selectCurrentOutlineOnly', 'editingOutlines', 'selectedOutlines', 'showHiddenOutlines', 'editingRegions', 'selectedRegion', 'drawingRegion', 'regionDraft', 'regionWidth', 'regionTaperLength', 'regionScope'].map(key => [key, state[key]]));
   const viewport = $('#canvas-viewport');
-  Object.assign(ui, { editingBridges: state.editingBridges, selectedRegionBridge: state.selectedRegionBridge, selectedRegionBridges: state.selectedRegionBridges });
+  Object.assign(ui, { workflowStep: state.workflowStep, activeTool: state.activeTool, showBridges: state.showBridges, reviewingTypes: state.reviewingTypes, reviewRegion: state.reviewRegion, sourceChosen: state.sourceChosen, editingBridges: state.editingBridges, selectedRegionBridge: state.selectedRegionBridge, selectedRegionBridges: state.selectedRegionBridges });
   return {
     version: 1, source: state.source, name: state.name, example: state.example,
     document: snapshot(), ui, history: history.serialize(),
@@ -994,6 +982,9 @@ function saveWorkspace() {
   let result;
   try { result = writeWorkspace(localStorage, saved, storageKey()); }
   catch { result = { saved: false }; }
+  const saveMessage = result.saved ? result.historyTruncated ? 'Saved with Shortened History' : 'Saved on This Device' : 'Could Not Save';
+  if ($('#save-status').textContent !== saveMessage) $('#save-status').textContent = saveMessage;
+  $('#save-status').classList.toggle('save-error', !result.saved);
   if ((!result.saved || result.historyTruncated) && !storageWarningShown) {
     storageWarningShown = true;
     notify(result.saved ? 'Workspace saved, but browser storage is full; older undo history could not be kept.' : 'This browser could not save your workspace. Keep this page open to retain your edits.', 'warning');
@@ -1009,10 +1000,16 @@ function restoreWorkspace() {
     const selectedContour = contourIds.has(saved.ui.selectedContour) ? saved.ui.selectedContour : artwork.contours[0].id;
     Object.assign(state, saved.document.settings, saved.ui, { artwork, source: saved.source, name: saved.name, example: saved.example, sourceWarnings: artwork.warnings, tabLayouts: saved.document.tabLayouts, selectedContour });
     state.hiddenContours = (saved.document.hiddenContours ?? []).filter(id => contourIds.has(id));
-    state.regions = structuredClone(saved.document.regions ?? []);
+    state.regions = structuredClone(saved.document.regions ?? []).map((region, index) => ({ ...region, label: region.label ?? `Region ${index + 1}` }));
     state.cutawayContours = (saved.document.cutawayContours ?? []).filter(id => artwork.contours.some(c => c.id === id && c.closed));
     for (const [key, value] of Object.entries(materialDefaults())) state[key] = structuredClone(saved.document[key] ?? value);
     preserveLegacyAreaChoices(saved.document);
+    state.workflowStep = saved.ui.workflowStep ?? 2;
+    state.activeTool = saved.ui.activeTool ?? (saved.ui.editing ? 'tabs' : saved.ui.editingRegions ? 'regions' : saved.ui.editingBridges ? 'bridges' : 'layers');
+    state.showBridges = saved.ui.showBridges ?? saved.ui.showTabs;
+    state.sourceChosen = saved.ui.sourceChosen ?? true;
+    state.reviewingTypes = saved.ui.reviewingTypes ?? false;
+    state.reviewRegion = saved.ui.reviewRegion ?? null;
     state.selectedRegionBridges = saved.ui.selectedRegionBridges ?? (saved.ui.selectedRegionBridge ? [saved.ui.selectedRegionBridge] : []);
     state.selectedOutlines = (saved.ui.selectedOutlines ?? []).filter(id => contourIds.has(id));
     // Controls outside the SVG are persistent DOM, so synchronize them explicitly.

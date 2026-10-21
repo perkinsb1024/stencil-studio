@@ -58,7 +58,7 @@ await check('New imports apply high-confidence Cut Away, Keep and Hidden with ex
   assert($('#treatment-outline-1').value === 'keep');
   assert(d.querySelectorAll('.area-suggestion').length === 2);
   await upload(wrap('<rect x="10" y="10" width="80" height="80"/><rect x="10" y="10" width="80" height="80"/>'));
-  assert($('#treatment-outline-0').value === 'hidden');
+  assert($('#treatment-outline-0').value === 'outline' && !$('#visible-outline-0').checked);
   assert($('#treatment-outline-1').value === 'cut');
   assert($('#visible-outline-0').checked === false);
 });
@@ -66,23 +66,21 @@ await check('Manual choices survive safe reapplication; reapply and use-all-outl
   await change('#treatment-outline-1', 'keep');
   await click('#apply-area-suggestions');
   assert($('#treatment-outline-1').value === 'keep');
-  assert(d.querySelector('.area-suggestion').textContent.includes('Manual choice'));
+  assert(d.querySelector('[data-order-id="shape-1"] .area-suggestion').textContent.includes('Manual'));
   await click('#use-all-outlines');
   assert([...d.querySelectorAll('[data-treatment-outline]')].every(el => el.value === 'outline'));
   assert([...d.querySelectorAll('[data-visible-outline]')].every(el => el.checked));
   await click('#undo');
-  assert($('#treatment-outline-0').value === 'hidden' && $('#treatment-outline-1').value === 'keep');
+  assert($('#treatment-outline-0').value === 'outline' && !$('#visible-outline-0').checked && $('#treatment-outline-1').value === 'keep');
 });
-await check('Review selects uncertain geometry; explicit acceptance exposes bridge warnings and can be undone', async () => {
+await check('Compound cuts apply immediately, support warnings remain separate, and manual edits undo', async () => {
   await upload(wrap('<path fill-rule="evenodd" d="M10 10H90V90H10Z M30 30H70V70H30Z"/>'));
-  assert($('#treatment-outline-0').value === 'outline', 'Donut default: ' + $('#treatment-outline-0').value + ' / ' + $('#notice').textContent);
-  await click('#review-areas');
-  assert($('#select-outline-0').getAttribute('aria-pressed') === 'true', 'Review did not select the donut');
-  assert($('#area-review-hint').textContent.includes('needs your choice'));
-  await click('#accept-area-suggestion');
-  assert($('#treatment-outline-0').value === 'cut', 'Acceptance left ' + $('#treatment-outline-0').value);
-  assert($('#notice').textContent.includes('unsupported'));
-  await click('#undo'); assert($('#treatment-outline-0').value === 'outline');
+  assert($('#treatment-outline-0').value === 'cut', 'Donut default: ' + $('#treatment-outline-0').value);
+  assert($('#review-areas').hidden, 'Support issues were treated as uncertain layer types');
+  await click('[data-step="3"]'); assert($('#geometry-issue-list').textContent.includes('unsupported'));
+  await click('#edit-outlines');
+  await change('#treatment-outline-0', 'outline');
+  await click('#undo'); assert($('#treatment-outline-0').value === 'cut');
 });
 await check('Suggestions, manual overrides and their original physical size survive reload without reclassification', async () => {
   await change('#treatment-outline-0', 'keep');

@@ -44,7 +44,7 @@ await check('Great Lakes imports and cancel leaves source and edits unchanged', 
   original = saved(); originalCuts = cuts();
   originalDimensions = [$('#dimension-width').textContent, $('#dimension-height').textContent];
   await click('#simplify-artwork'); assert($('#simplify-dialog').open);
-  assert($('#apply-simplify').disabled && $('#simplify-statistics').textContent.includes('Nodes:'));
+  assert($('#apply-simplify').disabled && $('#simplify-statistics').textContent.includes('Nodes'));
   await change('#simplify-tolerance', 0.12); await preview();
   await click('#cancel-simplify');
   assert(!$('#simplify-dialog').open && cuts() === originalCuts);

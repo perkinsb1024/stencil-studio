@@ -172,3 +172,19 @@ test('area suggestions and manual overrides survive mixed history and reject mal
     assert.equal(readWorkspace(store), null);
   }
 });
+
+test('guided workflow, review decisions and stable region names round trip with older history', () => {
+  const store = storage();
+  const current = { ...document, areaOverrides: { 'shape-0': true }, areaDecisions: { 'shape-0': 'kept' }, areaSuggestionBasis: { artworkWidth: 150, channelWidth: 1.5, minimumMaterialWidth: 0.5 }, regions: [{ ...widthRegion, label: 'Region 4' }] };
+  const saved = { ...workspace, document: current, ui: { ...workspace.ui, workflowStep: 2, activeTool: 'tabs', showBridges: false, reviewingTypes: true, reviewRegion: 'shape-0', sourceChosen: true }, history: { past: [document, current], future: [current] } };
+  writeWorkspace(store, saved);
+  assert.deepEqual(readWorkspace(store), saved);
+  for (const change of [{ areaDecisions: { 'shape-0': 'visited' } }, { areaDecisions: { 'shape-1': 'kept' } }, { regions: [{ ...widthRegion, label: '<img>' }] }, { areaSuggestionBasis: { artworkWidth: -1 } }]) {
+    store.setItem(workspaceKey, JSON.stringify({ ...saved, document: { ...current, ...change } }));
+    assert.equal(readWorkspace(store), null);
+  }
+  for (const change of [{ workflowStep: 4 }, { activeTool: 'unknown' }, { reviewRegion: 'bad' }, { showBridges: 'true' }]) {
+    store.setItem(workspaceKey, JSON.stringify({ ...saved, ui: { ...saved.ui, ...change } }));
+    assert.equal(readWorkspace(store), null);
+  }
+});

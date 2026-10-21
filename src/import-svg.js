@@ -9,7 +9,7 @@ export function importSvg(source) {
   const doc = new DOMParser().parseFromString(source, 'image/svg+xml');
   if (doc.querySelector('parsererror') || doc.documentElement.localName !== 'svg') throw new Error('This file is not a valid SVG. Try exporting it again from your drawing app.');
   const warnings = [];
-  const description = [...doc.querySelectorAll('title, desc, text')].map(el => el.textContent.trim()).filter(Boolean).join(' · ');
+  const description = [...doc.querySelectorAll('title, desc, text')].map(el => el.textContent.trim()).filter(Boolean).join('\n');
   if (doc.querySelector('text')) {
     if (!doc.querySelector('path, rect, circle, ellipse, line, polyline, polygon, use')) throw new Error('This SVG contains live text. Convert text to paths in your drawing app, then upload it again.');
     warnings.push('Live text was skipped. Convert text to paths first if you want to cut the lettering.');

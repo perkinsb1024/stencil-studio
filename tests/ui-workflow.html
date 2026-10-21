@@ -1,0 +1,155 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Guided UI Checks</title>
+<style>body{font:14px system-ui;margin:24px;color:#502c6c}li{margin:9px 0}.fail{color:#b22}iframe{width:1280px;height:800px;border:1px solid #ccc}#summary{font-weight:700}</style>
+<h1>Guided UI Checks</h1><p id="summary">Running…</p><ol id="results"></ol><iframe id="editor" title="Guided Stencil Editor"></iframe>
+<script type="module">
+const frame = document.querySelector('#editor'), key = 'stencil-studio.workspace.v1:guided-ui-checks';
+localStorage.removeItem(key);
+let d, w, passes = 0, failures = 0;
+const $ = selector => d.querySelector(selector);
+const tick = () => new Promise(resolve => setTimeout(resolve, 60));
+const assert = (condition, message = 'Unexpected result') => { if (!condition) throw new Error(message); };
+async function check(name, action) { const li = document.createElement('li'); try { await action(); li.textContent = `PASS — ${name}`; passes++; } catch (error) { failures++; li.className = 'fail'; li.textContent = `FAIL — ${name}: ${error.message}`; } document.querySelector('#results').append(li); }
+async function load(reload = false) { await new Promise(resolve => { frame.onload = resolve; if (reload) frame.contentWindow.location.reload(); else frame.src = '/?workspace=guided-ui-checks&live-reload=off'; }); w = frame.contentWindow; d = w.document; w.requestAnimationFrame = cb => w.setTimeout(() => cb(w.performance.now()), 16); w.cancelAnimationFrame = id => w.clearTimeout(id); await tick(); }
+const click = async selector => { assert($(selector), `Missing ${selector}`); $(selector).click(); await tick(); };
+async function change(selector, value) { $(selector).value = value; $(selector).dispatchEvent(new w.Event('change', { bubbles: true })); await tick(); }
+function saved() { w.dispatchEvent(new w.Event('stencil:before-reload')); return JSON.parse(localStorage.getItem(key)); }
+const cuts = () => $('.cut-shape').getAttribute('d');
+const layerOrder = () => [...$('#outline-list').children].map(row => row.dataset.orderId);
+async function upload(source) { const files = new w.DataTransfer(); files.items.add(new w.File([source], 'Test.svg', { type: 'image/svg+xml' })); $('#file-input').files = files.files; $('#file-input').dispatchEvent(new w.Event('change')); await tick(); await tick(); }
+const svg = body => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">${body}</svg>`;
+async function region(width) {
+  await click('#draw-region');
+  for (const [x, y] of [[8, 8], [158, 8], [158, 158], [8, 158]]) {
+    const point = new w.DOMPoint(x, y).matrixTransform($('#preview-svg').getScreenCTM());
+    $('#preview-svg').dispatchEvent(new w.MouseEvent('click', { bubbles: true, detail: 1, clientX: point.x, clientY: point.y }));
+  }
+  await click('#finish-region'); await change('#region-width', width);
+}
+await load();
+await check('Fresh workspace starts with sample artwork, plain step numbers and no separator clutter', () => {
+  assert($('.cut-shape') && $('.workspace').dataset.workflowStep === '1');
+  assert([...d.querySelectorAll('.step')].map(el => el.textContent).join(',') === '1,2,3');
+  assert(!d.body.textContent.includes('·'));
+  assert(!d.body.textContent.includes('LIVE VECTOR PREVIEW') && !d.body.textContent.includes('UNITS: MM'));
+});
+await check('Step/tool navigation and selection keep the desktop canvas in place', async () => {
+  const original = $('#canvas-area').getBoundingClientRect();
+  await click('#step-next');
+  for (const tool of ['#edit-tabs', '#edit-bridges', '#edit-regions', '#edit-outlines']) { await click(tool); const current = $('#canvas-area').getBoundingClientRect(); assert(Math.abs(current.top - original.top) < 1 && Math.abs(current.height - original.height) < 1, tool); }
+  assert($('#outline-inspector').closest('.inspector') && !$('#outline-inspector').closest('.preview-panel'));
+});
+await check('Reviewing/skipping types only selects artwork; keeping a type resolves one decision', async () => {
+  const before = cuts(), history = saved().history.past.length;
+  await click('#review-areas');
+  assert(!$('#type-review').hidden && $('#review-count').textContent.includes('2'));
+  const first = saved().ui.reviewRegion;
+  await click('#next-area');
+  assert(saved().ui.reviewRegion !== first && cuts() === before && saved().history.past.length === history);
+  await click('#keep-area-type');
+  assert($('#review-count').textContent.includes('1') && cuts() === before);
+  assert(saved().history.past.length === history + 1 && Object.values(saved().document.areaDecisions).includes('kept'));
+});
+await check('Undo restores uncertainty; redo and reload preserve the review queue and decision', async () => {
+  await click('#undo'); assert($('#review-count').textContent.includes('2'));
+  await click('#redo'); assert($('#review-count').textContent.includes('1'));
+  const before = saved(); await load(true);
+  assert(saved().ui.workflowStep === 2 && saved().ui.reviewingTypes);
+  assert(JSON.stringify(saved().document.areaDecisions) === JSON.stringify(before.document.areaDecisions));
+  await click('#keep-area-type'); assert($('#review-areas').hidden && $('#review-progress').textContent === '0 Remaining');
+  await click('#close-type-review'); await click('#apply-area-suggestions');
+  assert(Object.keys(saved().document.areaDecisions).length === 2);
+});
+await check('Layer move actions preserve identity and commit one undo step', async () => {
+  const before = layerOrder(), count = saved().history.past.length;
+  await click(`[data-order-id="${before[1]}"] [data-order-action="top"]`);
+  assert(layerOrder()[0] === before[1]); assert(saved().history.past.length === count + 1);
+  assert(d.activeElement.matches('.drag-handle'));
+  await click('#undo'); assert(layerOrder().join() === before.join());
+  await click('#redo'); assert(layerOrder()[0] === before[1]);
+});
+await check('Filtering disables reorder and Show All Layers restores it', async () => {
+  $('#layer-search').value = 'Layer 1'; $('#layer-search').dispatchEvent(new w.Event('input'));
+  assert($('#outline-list .drag-handle').disabled && !$('#layer-reorder-hint').hidden);
+  await click('#clear-layer-filter'); assert(!$('#outline-list .drag-handle').disabled);
+});
+await check('Touch reorder commits once, while Escape and no-op drops preserve order/history', async () => {
+  const before = layerOrder(), history = saved().history.past.length;
+  const handle = $(`[data-order-id="${before[1]}"] .drag-handle`), top = $(`[data-order-id="${before[0]}"]`).getBoundingClientRect();
+  const box = handle.getBoundingClientRect(), x = box.left + box.width / 2, y = box.top + box.height / 2;
+  const point = (type, py) => handle.dispatchEvent(new w.PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 11, pointerType: 'touch', button: 0, clientX: x, clientY: py }));
+  point('pointerdown', y); point('pointermove', top.top + 2); point('pointerup', top.top + 2); await tick();
+  assert(layerOrder()[0] === before[1], layerOrder().join());
+  assert(saved().history.past.length === history + 1);
+  const newHandle = $('#outline-list .drag-handle'), rect = newHandle.getBoundingClientRect();
+  newHandle.dispatchEvent(new w.PointerEvent('pointerdown', { bubbles: true, button: 0, pointerId: 12, clientX: rect.left + 5, clientY: rect.top + 5 }));
+  d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert(saved().history.past.length === history + 1 && !d.querySelector('.drag-ghost'));
+});
+await check('Automatic and custom tab editing still work in the side inspector', async () => {
+  await click('#edit-tabs'); assert(!$('#tab-inspector').hidden);
+  await change('#tab-picker', 'auto-0'); assert(!$('#selected-tab-controls').hidden);
+  await change('#selected-tab-width', '4.2'); assert(saved().document.tabLayouts['outline-0'].some(tab => tab.widthOverride === 4.2));
+  await click('#undo'); assert(!Object.keys(saved().document.tabLayouts).length);
+});
+await check('Width regions have stable names, reorder priority, undo and reload recovery', async () => {
+  await click('#edit-regions'); await change('#region-scope', 'all');
+  await region('0.6'); await region('2.5');
+  const before = saved(), regions = before.document.regions;
+  assert(regions.length === 2 && regions[0].label === 'Region 1' && regions[1].label === 'Region 2');
+  const geometry = cuts(); await click(`[data-order-id="${regions[0].id}"] [data-order-action="top"]`);
+  assert(cuts() !== geometry && saved().document.regions[1].id === regions[0].id);
+  assert(saved().document.regions[1].label === 'Region 1');
+  await click('#undo'); assert(cuts() === geometry);
+  await click('#redo'); const ordered = saved(); await load(true);
+  assert(saved().document.regions.map(r => r.id).join() === ordered.document.regions.map(r => r.id).join());
+});
+await check('Draft polygons survive step navigation and remain excluded from finished geometry', async () => {
+  await click('#draw-region');
+  const point = new w.DOMPoint(40, 40).matrixTransform($('#preview-svg').getScreenCTM());
+  $('#preview-svg').dispatchEvent(new w.MouseEvent('click', { bubbles: true, detail: 1, clientX: point.x, clientY: point.y }));
+  const before = cuts(), draft = saved().ui.regionDraft;
+  await click('[data-step="3"]'); assert(cuts() === before, 'Review changed finished cuts');
+  await click('[data-step="2"]'); assert(saved().ui.regionDraft.length === draft.length && saved().ui.drawingRegion, `Draft lost: ${JSON.stringify(saved().ui.regionDraft)}, drawing=${saved().ui.drawingRegion}`);
+  await click('#cancel-region');
+});
+await check('Review checks material without opening Bridges and keeps types nonblocking', async () => {
+  await upload(svg('<path fill-rule="evenodd" d="M10 10H90V90H10Z M30 30H70V70H30Z"/>'));
+  await click('#review-areas'); await click('#accept-area-suggestion'); await click('[data-step="3"]');
+  assert($('#review-support').textContent === 'Material Needs Attention', $('#review-support').textContent);
+  assert(!$('#download').disabled && $('#review-issues').textContent.includes('unsupported'));
+  assert($('#export-dimensions').textContent.includes('Sheet Size'));
+});
+await check('Tab and bridge overlays are independent and never change cut geometry', async () => {
+  await click('#edit-bridges'); await click('#generate-bridges'); await click('[data-step="3"]');
+  assert($('#review-support').textContent === 'All Material Connected', $('#review-support').textContent);
+  const before = cuts();
+  await click('#show-tabs'); assert(!saved().ui.showTabs && saved().ui.showBridges);
+  await click('#show-bridges'); assert(!saved().ui.showBridges && !d.querySelector('.region-bridge'));
+  await click('#show-original'); assert(cuts() === before);
+});
+await check('All-hidden artwork explains download availability and can still export the session', async () => {
+  await click('#edit-outlines'); await click('#select-outline-0'); await click('#keep-only-outlines'); await click('#hide-outlines'); await click('[data-step="3"]');
+  assert($('#download').disabled && !$('#download-reason').hidden && !$('#export-session').disabled);
+  await click('#recover-layers'); assert(!$('#download').disabled);
+});
+await check('Simplify SVG uses clear actions and separate metrics', async () => {
+  await click('[data-step="1"]'); await click('#simplify-artwork');
+  assert($('#simplify-dialog').open && $('#download-simplify').textContent === 'Download Simplified SVG');
+  assert($('#simplify-statistics').children.length === 2);
+  await click('#cancel-simplify'); assert(!$('#simplify-dialog').open);
+});
+await check('Phone and tablet layouts have no horizontal overflow and keep the editing canvas first', async () => {
+  for (const width of [768, 390, 320]) {
+    frame.style.width = `${width}px`; await tick(); await click('#edit-tabs');
+    assert(d.documentElement.scrollWidth <= w.innerWidth, `${width}: ${d.documentElement.scrollWidth}`);
+    assert($('#canvas-area').getBoundingClientRect().top < $('#tab-inspector').getBoundingClientRect().top, `${width}: canvas order`);
+    await click('#toggle-controls'); assert(!$('#toggle-controls').getAttribute('aria-expanded').includes('true'));
+    await click('#toggle-controls');
+    await click('#edit-bridges'); await click('#edit-regions'); await click('#edit-outlines');
+    assert(d.documentElement.scrollWidth <= w.innerWidth, `${width}: tools overflow`);
+  }
+  frame.style.width = '1280px';
+});
+document.querySelector('#summary').textContent = `${passes} passed, ${failures} failed`;
+document.title = failures ? `FAIL: ${failures} Guided UI Checks` : `PASS: ${passes} Guided UI Checks`;
+</script></html>

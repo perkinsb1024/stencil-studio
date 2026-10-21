@@ -14,6 +14,8 @@ const validSuggestions = value => value === undefined || value === null || isObj
   Array.isArray(value.warnings) && value.warnings.length <= 1000 && value.warnings.every(w => typeof w === 'string' && w.length <= 2000);
 const validMaterial = value =>
   validSuggestions(value.areaSuggestions) &&
+  (value.areaDecisions === undefined || isObject(value.areaDecisions) && Object.keys(value.areaDecisions).length <= 500 && Object.entries(value.areaDecisions).every(([id, decision]) => isShape(id) && ['manual', 'accepted', 'kept'].includes(decision) && value.areaOverrides?.[id] === true)) &&
+  (value.areaSuggestionBasis === undefined || value.areaSuggestionBasis === null || isObject(value.areaSuggestionBasis) && ['artworkWidth', 'channelWidth', 'minimumMaterialWidth'].every(key => Number.isFinite(value.areaSuggestionBasis[key]) && value.areaSuggestionBasis[key] > 0)) &&
   (value.areaOverrides === undefined || isObject(value.areaOverrides) && Object.keys(value.areaOverrides).length <= 500 && Object.entries(value.areaOverrides).every(([id, manual]) => isShape(id) && manual === true)) &&
   (value.materialVersion === undefined || value.materialVersion === 1) &&
   (value.materialTreatments === undefined || isObject(value.materialTreatments) && Object.keys(value.materialTreatments).length <= 500 && Object.entries(value.materialTreatments).every(([key, mode]) => isShape(key) && ['outline', 'keep', 'cut'].includes(mode))) &&
@@ -23,7 +25,7 @@ const validMaterial = value =>
   ['bridgeWidth', 'minimumMaterialWidth'].every(key => value[key] === undefined || Number.isFinite(value[key]) && value[key] >= (key === 'bridgeWidth' ? 0.5 : 0.1) && value[key] <= 15) &&
   ['bridgeReinforcement', 'bridgeMatchFeatures'].every(key => value[key] === undefined || typeof value[key] === 'boolean');
 const validRegions = value => Array.isArray(value) && value.length <= 100 && new Set(value.map(r => r?.id)).size === value.length && value.every(r =>
-  isObject(r) && isRegion(r.id) && (r.contourId === null || isContour(r.contourId)) && Number.isFinite(r.width) && r.width >= 0.2 && r.width <= 12 && (r.taperLength === undefined || Number.isFinite(r.taperLength) && r.taperLength >= 0.1 && r.taperLength <= 50) && validPolygon(r.points));
+  isObject(r) && isRegion(r.id) && (r.label === undefined || typeof r.label === 'string' && /^Region \d{1,6}$/.test(r.label)) && (r.contourId === null || isContour(r.contourId)) && Number.isFinite(r.width) && r.width >= 0.2 && r.width <= 12 && (r.taperLength === undefined || Number.isFinite(r.taperLength) && r.taperLength >= 0.1 && r.taperLength <= 50) && validPolygon(r.points));
 const ranges = { artworkWidth: [10, 1000], channelWidth: [0.2, 12], tabWidth: [0.5, 15], tabCount: [1, 24], tabOffset: [0, 100], margin: [0, 100] };
 function validSnapshot(value) {
   return isObject(value) && validMaterial(value) && (value.source === undefined || typeof value.source === 'string' && value.source.length <= 3_000_000 && typeof value.name === 'string' && (value.example === undefined || typeof value.example === 'string')) && (value.regions === undefined || validRegions(value.regions)) && ['hiddenContours', 'cutawayContours'].every(key => value[key] === undefined || isContourList(value[key])) && isObject(value.settings) && Object.entries(ranges).every(([key, [min, max]]) =>
@@ -40,6 +42,9 @@ export function readWorkspace(storage, key = workspaceKey) {
     if (!isObject(saved) || saved.version !== 1 || typeof saved.source !== 'string' || saved.source.length > 3_000_000 ||
       typeof saved.name !== 'string' || !validSnapshot(saved.document) || !isObject(saved.ui)) return null;
     const ui = saved.ui;
+    if (ui.workflowStep !== undefined && ![1, 2, 3].includes(ui.workflowStep) || ui.activeTool !== undefined && !['layers', 'tabs', 'bridges', 'regions'].includes(ui.activeTool) ||
+      ['showBridges', 'reviewingTypes', 'sourceChosen'].some(key => ui[key] !== undefined && typeof ui[key] !== 'boolean') ||
+      ui.reviewRegion !== undefined && ui.reviewRegion !== null && !isShape(ui.reviewRegion)) return null;
     if (['panX', 'panY'].some(key => ui[key] !== undefined && (!Number.isFinite(ui[key]) || Math.abs(ui[key]) > 1_000_000))) return null;
     // These optional fields preserve compatibility with workspaces and history
     // saved before outline visibility was editable.
