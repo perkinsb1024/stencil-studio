@@ -575,6 +575,7 @@ const simplifyEditor = createSimplifyEditor({
     const artwork = importSvg(source);
     mutate(() => {
       state.artwork = artwork; state.source = source; state.sourceWarnings = artwork.warnings;
+      state.activeTool = 'layers';
       state.name = state.name.replace(/(?:-simplified)?\.svg$/i, '') + '-simplified.svg'; state.example = '';
       state.tabLayouts = {}; state.hiddenContours = []; state.cutawayContours = []; state.regions = [];
       Object.assign(state, materialDefaults()); bridgeEditor.cancel(); state.selectedRegionBridge = null; state.selectedRegionBridges = [];
@@ -610,13 +611,12 @@ function syncEditingFlags() {
 function closeActionPanels() {
   document.querySelectorAll('.action-popover:popover-open').forEach(panel => panel.hidePopover());
 }
-function navigateStep(step, resumeTool = false) {
+function navigateStep(step) {
   if (![1, 2, 3].includes(step)) return;
   closeActionPanels();
   layerOrdering.cancel(); regionOrdering.cancel();
   commitWorkspaceEdits(); clearGhost();
   bridgeEditor.cancel(); state.adding = false;
-  if (step === 2 && !resumeTool) state.activeTool = 'layers';
   previewPan.reset();
   state.workflowStep = step; state.controlsCollapsed = false;
   syncEditingFlags(); render(); resetInspectorScroll(); queueWorkspaceSave();
@@ -639,7 +639,7 @@ function announce(message) { $('#announcements').textContent = message; }
 for (const [tool, id] of Object.entries({ layers: 'edit-outlines', tabs: 'edit-tabs', bridges: 'edit-bridges', regions: 'edit-regions' })) $(`#${id}`).addEventListener('click', () => activateTool(tool));
 document.querySelectorAll('[data-step]').forEach(button => button.addEventListener('click', () => navigateStep(Number(button.dataset.step))));
 $('#step-next').addEventListener('click', () => navigateStep(state.workflowStep + 1));
-$('#step-back').addEventListener('click', () => navigateStep(state.workflowStep - 1, true));
+$('#step-back').addEventListener('click', () => navigateStep(state.workflowStep - 1));
 $('#toggle-controls').addEventListener('click', () => { state.controlsCollapsed = !state.controlsCollapsed; updateWorkspaceUI(state); queueWorkspaceSave(); });
 document.addEventListener('click', event => {
   const trigger = event.target.closest('[popovertarget]');
@@ -1142,6 +1142,7 @@ $('#help-dialog').addEventListener('click', e => { if (e.target === $('#help-dia
 new ResizeObserver(scheduleRender).observe($('#canvas-viewport'));
 let workspaceSaveTimer;
 let storageWarningShown = false;
+let lastSavedDocument = null;
 updateRangePaint();
 if (!restoreWorkspace()) loadSource(examples.bloom.svg, examples.bloom.name, 'bloom');
 
@@ -1166,12 +1167,26 @@ function captureWorkspace() {
     focus: document.activeElement?.id || null,
   };
 }
+function workspaceDocumentSignature(saved) {
+  return JSON.stringify([saved.source, saved.name, saved.example, saved.document, saved.history]);
+}
 function saveWorkspace(force = false) {
   clearTimeout(workspaceSaveTimer);
   if (!state.source || busy.active && !force) return;
   const saved = captureWorkspace();
+  const signature = workspaceDocumentSignature(saved);
   let result;
-  try { result = writeWorkspace(localStorage, saved, storageKey()); }
+  try {
+    // Every open tab flushes during a code reload. A tab with no document
+    // edits must not overwrite newer work saved by another tab, even if its
+    // focus, selection, or scroll position has changed.
+    if (signature === lastSavedDocument) {
+      const latest = localStorage.getItem(storageKey());
+      if (latest && workspaceDocumentSignature(JSON.parse(latest)) !== signature) return;
+    }
+    result = writeWorkspace(localStorage, saved, storageKey());
+    if (result.saved) lastSavedDocument = signature;
+  }
   catch { result = { saved: false }; }
   const saveMessage = result.saved ? result.historyTruncated ? 'Saved with Shortened History' : 'Saved on This Device' : 'Could Not Save';
   if ($('#save-status').textContent !== saveMessage) $('#save-status').textContent = saveMessage;
@@ -1218,6 +1233,7 @@ function restoreWorkspace() {
     // Older snapshots share the workspace source. Bind it now so Undo can
     // cross a later artwork replacement without losing that original SVG.
     history.hydrate(Object.fromEntries(['past', 'future'].map(key => [key, saved.history[key].map(entry => ({ source: saved.source, name: saved.name, example: saved.example ?? '', ...entry }))])));
+    lastSavedDocument = workspaceDocumentSignature(captureWorkspace());
     if (!state.areaSuggestions) refreshAreaSuggestions();
     render();
     requestAnimationFrame(() => {

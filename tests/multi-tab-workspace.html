@@ -1,0 +1,64 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Multiple tab workspace checks</title>
+<style>body{font:15px system-ui;padding:24px}iframe{width:1100px;height:900px}.fail{color:#b22}</style>
+<h1>Multiple tab workspace checks</h1><p id="summary">Running…</p><ol id="results"></ol>
+<script type="module">
+import { previewReady } from './preview-ready.js';
+const key = 'stencil-studio.workspace.v1:multi-tab-tests';
+localStorage.removeItem(key);
+const assert = (condition, message) => { if (!condition) throw new Error(message); };
+const wait = async frame => {
+  await new Promise(resolve => setTimeout(resolve, 200));
+  await previewReady(frame.contentDocument);
+};
+async function open() {
+  const frame = document.createElement('iframe');
+  frame.title = 'Editor copy';
+  const loaded = new Promise(resolve => frame.onload = resolve);
+  frame.src = '/?workspace=multi-tab-tests&live-reload=off';
+  document.body.append(frame); await loaded; await wait(frame);
+  return frame;
+}
+async function click(frame, selector) { frame.contentDocument.querySelector(selector).click(); await wait(frame); }
+async function change(frame, selector, value) {
+  const input = frame.contentDocument.querySelector(selector);
+  input.value = value;
+  input.dispatchEvent(new frame.contentWindow.Event('change', { bubbles: true }));
+  await wait(frame);
+}
+function flush(frame, type = 'stencil:before-reload') { frame.contentWindow.dispatchEvent(new frame.contentWindow.Event(type)); }
+const saved = () => JSON.parse(localStorage.getItem(key));
+const li = document.createElement('li');
+try {
+  const old = await open();
+  await click(old, '#bridge-snap-angles');
+  await click(old, '#edit-tabs');
+  await change(old, '#tab-picker', 'auto-0');
+  await change(old, '#selected-tab-position', 15);
+  flush(old);
+  const current = await open();
+  await click(current, '#bridge-snap-angles');
+  await change(current, '#selected-tab-position', 35);
+  flush(current);
+  const expected = saved();
+  assert(expected.document.bridgeSnapAngles === true, 'Current tab did not enable angle snaps');
+  assert(JSON.stringify(expected.document.tabLayouts) !== JSON.stringify(saved().history.past.at(-1).tabLayouts), 'Placement did not change');
+  // The stale tab can still change its UI without having edited the document.
+  await click(old, '#zoom-in');
+  for (const event of ['stencil:before-reload', 'pagehide']) {
+    flush(old, event);
+    assert(JSON.stringify(saved().document) === JSON.stringify(expected.document), `${event} overwrote newer edits`);
+    assert(JSON.stringify(saved().history) === JSON.stringify(expected.history), `${event} overwrote newer history`);
+  }
+  const loaded = new Promise(resolve => current.onload = resolve);
+  current.contentWindow.location.reload(); await loaded; await wait(current);
+  assert(current.contentDocument.querySelector('#bridge-snap-angles').checked, 'Angle snaps changed after reload');
+  assert(JSON.stringify(saved().document.tabLayouts) === JSON.stringify(expected.document.tabLayouts), 'Placements changed after reload');
+  // New edits from the old tab are still allowed to save.
+  await click(old, '#bridge-snap-angles');
+  flush(old);
+  assert(saved().document.bridgeSnapAngles === true, 'An intentional edit could not save');
+  li.textContent = 'PASS — Stale reloads preserve newer snap preferences, placements, and history';
+} catch (error) { li.className = 'fail'; li.textContent = `FAIL — ${error.message}`; }
+document.querySelector('#results').append(li);
+document.querySelector('#summary').textContent = li.classList.contains('fail') ? '0 passed, 1 failed' : '1 passed, 0 failed';
+</script>

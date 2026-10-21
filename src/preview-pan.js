@@ -1,6 +1,6 @@
 // Share pointer ownership between view navigation and the SVG editing tools.
 export function createPreviewPan({ viewport, enabled, active = () => true, defaultDrag = () => true, getPosition, setPosition, button, changed = () => {}, modeChanged = () => {} }) {
-  let gesture = null, space = false, spaceUsed = false, mode = false, suppressClickUntil = 0;
+  let gesture = null, space = false, spaceUsed = false, spaceStarted = 0, mode = false, suppressClickUntil = 0;
   const available = () => active() && enabled();
   const ready = () => available() && (space || mode || defaultDrag());
   function refresh() {
@@ -46,17 +46,25 @@ export function createPreviewPan({ viewport, enabled, active = () => true, defau
       stop(null, true); event.preventDefault(); event.stopImmediatePropagation(); return;
     }
     if (event.code !== 'Space' || !available() || typing(event.target) || event.ctrlKey || event.metaKey || event.altKey) return;
-    if (!space) spaceUsed = false;
+    if (!space) {
+      if (event.repeat) return;
+      spaceUsed = !!gesture;
+      spaceStarted = performance.now();
+    }
+    if (event.repeat) spaceUsed = true;
     space = true;
-    // A focused button still supports a normal Space press. If a drag starts,
-    // suppress its keyup activation instead, so Space-drag cannot click it.
-    if (!event.target.closest('button, [role="button"]')) event.preventDefault();
+    // Claim the shortcut when it controls Pan, including when Pan has focus,
+    // so the browser cannot also activate a focused button on release.
+    if (button || !event.target.closest('button, [role="button"]')) event.preventDefault();
+    if (button) event.stopImmediatePropagation();
     refresh();
   }, true);
   document.addEventListener('keyup', event => {
     if (event.code !== 'Space' || !space) return;
     space = false;
-    if (spaceUsed || !event.target.closest('button, [role="button"]')) event.preventDefault();
+    if (button && !spaceUsed && performance.now() - spaceStarted < 250 && available() && !typing(event.target) && !event.ctrlKey && !event.metaKey && !event.altKey) mode = !mode;
+    if (button || spaceUsed || !event.target.closest('button, [role="button"]')) event.preventDefault();
+    if (button) event.stopImmediatePropagation();
     spaceUsed = false; refresh();
   }, true);
   function reset() { stop(null); space = spaceUsed = false; mode = false; suppressClickUntil = 0; refresh(); }

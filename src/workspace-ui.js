@@ -13,8 +13,8 @@ export function updatePanHint(state, mode = $('#pan-preview').getAttribute('aria
   let hint = 'Zoom in to pan the canvas.';
   if (state.zoom > 1) {
     if (state.workflowStep !== 2) hint = 'Drag to pan the zoomed canvas.';
-    else if (mode) hint = 'Pan is on. Drag to move the canvas. Turn Pan off to edit.';
-    else hint = 'Drag to select or edit. Hold Space and drag to pan.';
+    else if (mode) hint = 'Pan is on. Drag to move the canvas. Tap Space to turn Pan off and edit.';
+    else hint = 'Drag to select or edit. Tap Space to toggle Pan, or hold Space and drag to pan.';
   }
   $('#move-view-hint').textContent = hint;
 }
@@ -34,7 +34,7 @@ export function updateWorkspaceUI(state) {
   $('#step-next').hidden = step === 3;
   const toolName = { layers: 'Layers', tabs: 'Tabs', bridges: 'Bridges', regions: 'Width Regions' }[state.activeTool];
   $('#step-back').textContent = step === 3 ? `Back to ${toolName}` : 'Back to Artwork';
-  $('#step-next').textContent = step === 2 ? 'Continue to Review' : 'Continue to Layers';
+  $('#step-next').textContent = step === 2 ? 'Continue to Review' : `Continue to ${toolName}`;
   $('#pan-preview').hidden = step !== 2;
   $('#pan-preview').title = state.zoom > 1 ? 'Toggle between dragging to pan and editing artwork' : 'Zoom in to pan while editing';
   updatePanHint(state);

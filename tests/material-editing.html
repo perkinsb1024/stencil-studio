@@ -63,6 +63,17 @@ await check('Automatic bridges support the central laces and preserve the band c
   assert(initialBridgeWidth > 3, 'Expected the bridge to match the lace spine width');
   assert(d.querySelectorAll('.region-bridge').length === 1);
 });
+await check('Angle snap preference survives Review and back in both states', async () => {
+  for (const enabled of [false, true]) {
+    if ($('#bridge-snap-angles').checked !== enabled) await click('#bridge-snap-angles');
+    assert(flush().document.bridgeSnapAngles === enabled, 'Angle snap preference was not saved');
+    await click('#step-next');
+    await click('#step-back');
+    assert(!$('#bridge-inspector').hidden, 'Bridges did not resume after Review');
+    assert($('#bridge-snap-angles').checked === enabled, 'Review changed the angle snap checkbox');
+    assert(flush().document.bridgeSnapAngles === enabled, 'Review changed the angle snap preference');
+  }
+});
 await check('Width edits become custom, regeneration preserves them, and undo/redo works', async () => {
   const id = flush().document.regionBridges[0].id;
   await change('#bridge-picker', id); await change('#selected-bridge-width', '4.2');

@@ -15,7 +15,7 @@ export const bridgePanel = `
   <label class="check-label"><input id="bridge-snap-lines" type="checkbox" checked /><span>Snap to Nearby Lines</span></label>
   <p class="control-hint">Align straight bridge edges and angles while dragging. Hold Alt/Option to move freely.</p>
   <label class="check-label"><input id="bridge-snap-angles" type="checkbox" checked /><span>Snap to Horizontal, Vertical & 45°</span></label>
-  <p class="control-hint">Snap straight bridges within 5° while placing or dragging. The nearest snap wins; nearby lines win ties. Hold Alt/Option to move freely.</p>
+  <p class="control-hint">Snap straight bridges within 5° while placing or dragging. Nearby lines take priority over angle snaps. Hold Alt/Option to move freely.</p>
   <label class="field">Bridge<select id="bridge-picker" aria-label="Select Material Bridge"></select></label>
   <div id="bridge-selection" hidden><h3 id="bridge-selection-title">Selected Bridge</h3><div class="bridge-fields">${widthControl('selected-bridge-width', 'Bridge Width', 0.5)}<label class="check-label"><input id="selected-bridge-curved" type="checkbox" disabled /><span>Curved Bridge</span></label></div><p id="bridge-curve-hint" class="control-hint" hidden>Drag the bend handle to follow the artwork.</p><div class="region-actions"><button id="snap-bridge" class="small-button" disabled>Snap to Artwork</button><button id="remove-bridge" class="small-button danger" disabled>Remove Bridge</button></div></div>
   <details class="panel-details"><summary>Advanced</summary><div class="bridge-fields">${widthControl('minimum-material-width', 'Minimum Material Width', 0.1, 0.5)}<label class="check-label"><input id="bridge-reinforcement" type="checkbox" /><span>Add Reinforcement</span></label></div><button id="clear-bridge-exclusions" class="small-button" disabled>Allow Removed Connections</button><p class="control-hint">Allow previously removed automatic connections to be generated again.</p></details>
@@ -297,11 +297,11 @@ export function createBridgeEditor({ state, render, mutate, snapshot, restore, r
       const angled = state.bridgeSnapAngles !== false ? snapBridgeToAngles(physical, gesture.end) : physical;
       const lined = state.bridgeSnapLines !== false ? snapBridgeToLines(physical, gesture.snapLines, screenUnit() * 8, gesture.end) : physical;
       const inSheet = candidate => [candidate.a, candidate.b].every(p => p.x >= 0 && p.y >= 0 && p.x <= state.scaled.width && p.y <= state.scaled.height);
-      // Compare both candidates against the raw drag, so snapping does not
-      // compound. Ignore candidates that would move an anchor off the sheet.
-      const movement = candidate => candidate === physical || !inSheet(candidate) ? Infinity : Math.max(...['a', 'b'].map(end => Math.hypot(candidate[end].x - physical[end].x, candidate[end].y - physical[end].y)));
-      const snapped = movement(lined) <= movement(angled) ? lined : angled;
-      if (snapped !== physical && [snapped.a, snapped.b].every(p => p.x >= 0 && p.y >= 0 && p.x <= state.scaled.width && p.y <= state.scaled.height)) {
+      // Prefer an eligible nearby line throughout its snap range so small
+      // pointer movements cannot switch between line and angle candidates.
+      // Both candidates use the raw drag; ignore snaps outside the sheet.
+      const snapped = lined !== physical && inSheet(lined) ? lined : angled;
+      if (snapped !== physical && inSheet(snapped)) {
         Object.assign(bridge, unscaleBridge(snapped, state.artworkWidth, state.scaled.padding));
       }
     }
