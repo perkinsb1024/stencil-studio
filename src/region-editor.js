@@ -34,7 +34,7 @@ export function createRegionEditor({ state, render, mutate, snapshot, restore, r
     mutate(() => {
       const id = `region-${crypto.randomUUID()}`;
       state.regions.push({ id, label: `Region ${Math.max(0, ...state.regions.map(r => Number(r.label?.match(/\d+$/)?.[0]) || 0)) + 1}`, points: structuredClone(state.regionDraft), width: state.regionWidth, taperLength: state.regionTaperLength, contourId: state.regionScope === 'all' ? null : state.regionScope });
-      state.selectedRegion = id; state.drawingRegion = false; state.regionDraft = []; hover = null;
+      state.selectedRegion = null; state.regionDraft = []; hover = null; lastCornerClick = null;
     });
   }
   function update() {
@@ -65,12 +65,13 @@ export function createRegionEditor({ state, render, mutate, snapshot, restore, r
       slider.style.setProperty('--range', `${(slider.value - slider.min) / (slider.max - slider.min) * 100}%`);
     }
     $('#draw-region').disabled = state.drawingRegion || state.regions.length >= 100;
+    $('#draw-region').setAttribute('aria-pressed', state.drawingRegion);
     $('#finish-region').hidden = !state.drawingRegion;
     $('#finish-region').disabled = state.regionDraft.length < 3;
     $('#cancel-region').hidden = !state.drawingRegion;
     $('#remove-region').disabled = !region || state.drawingRegion;
     $('#region-picker').disabled = state.drawingRegion;
-    $('#region-hint').textContent = pickingLayer ? 'Choose an Outline layer in the canvas. Escape cancels.' : state.drawingRegion ? `${state.regionDraft.length} corners. Click to add; double-click or Enter finishes. Escape cancels.` : region && region.contourId && !channelContours.some(c => c.id === region.contourId) ? 'This region is inactive because its layer no longer uses Outline.' : 'Draw a polygon, then adjust its width. Drag corners or the interior to reshape it.';
+    $('#region-hint').textContent = pickingLayer ? 'Choose an Outline layer in the canvas. Escape cancels.' : state.drawingRegion ? `${state.regionDraft.length} corners. Click to add; double-click or Enter finishes a region. Keep drawing regions; Cancel or Escape stops drawing.` : region && region.contourId && !channelContours.some(c => c.id === region.contourId) ? 'This region is inactive because its layer no longer uses Outline.' : 'Draw a polygon, then adjust its width. Drag corners or the interior to reshape it.';
     const list = $('#region-list');
     const listKey = JSON.stringify([state.regions, state.selectedRegion, state.drawingRegion]);
     if (list.regionKey !== listKey) {
@@ -204,7 +205,7 @@ export function createRegionEditor({ state, render, mutate, snapshot, restore, r
     render(); finish();
   }
   svg.addEventListener('dblclick', e => {
-    if (!state.editingRegions || !state.drawingRegion || pickingLayer || gesture) return;
+    if (!state.editingRegions || !state.drawingRegion || !state.regionDraft.length || pickingLayer || gesture) return;
     e.preventDefault();
     const point = svgPoint(e); if (point) completeAt(point);
   });
@@ -254,7 +255,11 @@ export function createRegionEditor({ state, render, mutate, snapshot, restore, r
       }
       return;
     }
-    if (!state.editingRegions || e.target.closest('input, select, textarea, [contenteditable="true"]')) return;
+    if (!state.editingRegions || e.defaultPrevented) return;
+    if (e.key === 'Escape' && (state.drawingRegion || gesture)) {
+      e.preventDefault(); finishGesture(true); cancelDrawing(); return;
+    }
+    if (e.target.closest('input, select, textarea, [contenteditable="true"]')) return;
     if (state.drawingRegion && ['Enter', 'Escape', 'Backspace', 'Delete'].includes(e.key)) {
       e.preventDefault();
       if (e.key === 'Enter') finish();

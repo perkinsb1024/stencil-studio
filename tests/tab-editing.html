@@ -144,7 +144,7 @@ await check('Add mode keeps placing tabs across outlines until cancelled, with r
     const p = path.getPointAtLength(path.getTotalLength() * fraction).matrixTransform($('#preview-svg').getScreenCTM());
     pointer('pointermove', $('#preview-svg'), p); assert($('#tab-ghost'));
     pointer('pointerdown', $('#preview-svg'), p); await settle();
-    assert($('#add-tab').getAttribute('aria-pressed') === 'true' && $('#add-tab').textContent === 'Finish Adding');
+    assert($('#add-tab').getAttribute('aria-pressed') === 'true' && $('#add-tab').textContent === 'Cancel Placement');
     assert($('#tab-ghost'), 'Placement preview disappeared after adding a tab');
   }
   assert(markers().length === before + 3);

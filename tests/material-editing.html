@@ -230,6 +230,47 @@ await check('New artwork clears treatments and bridges while original Outline ta
   await click('#edit-tabs'); assert(!$('#tab-inspector').hidden && $('#bridge-inspector').hidden);
   assert(d.querySelectorAll('.tab-marker').length === 8);
 });
+await check('Dragging snaps a bridge edge flush to the artwork and undo restores the free position', async () => {
+  const source = '<svg xmlns="http://www.w3.org/2000/svg"><rect x="10" y="10" width="80" height="80" fill="black"/><rect x="40" y="40" width="20" height="20" fill="white"/></svg>';
+  const transfer = new w.DataTransfer();
+  transfer.items.add(new w.File([source], 'Snap.svg', { type: 'image/svg+xml' }));
+  $('#file-input').files = transfer.files; $('#file-input').dispatchEvent(new w.Event('change')); await tick();
+  await change('#artworkWidth', '150');
+  await click('#edit-bridges');
+  assert($('#bridge-snap-lines').checked && flush().document.bridgeSnapLines === true);
+  await change('#bridge-width', '3');
+  const a = { x: 66.1, y: 83 }, b = { x: 66.1, y: 3 };
+  await click('#add-bridge'); bridgePointer('pointerdown', a); await tick(); bridgePointer('pointerdown', b); await tick();
+  const before = flush().document.regionBridges[0];
+  assert(before, 'Bridge was not created');
+  const point = { x: a.x, y: 43 };
+  const movement = 5 / $('#preview-svg').getScreenCTM().a;
+  bridgePointer('pointerdown', point, $('.region-bridge.selected .bridge-hit'));
+  bridgePointer('pointermove', { x: point.x, y: point.y + movement }); await tick();
+  bridgePointer('pointerup', point); await tick();
+  const bridge = flush().document.regionBridges[0];
+  const x = bridge.a.x * 150 + 8;
+  assert(Math.abs(x - 65.75) < 0.001, `Bridge edge did not meet the counter edge: ${x}`);
+  assert(Math.abs(bridge.a.x - bridge.b.x) < 0.000001, 'Angle did not match');
+  await click('#undo'); assert(JSON.stringify(flush().document.regionBridges[0]) === JSON.stringify(before));
+  await change('#bridge-picker', before.id);
+});
+await check('Alt bypasses line snapping and the disabled preference survives reload', async () => {
+  const before = flush().document.regionBridges[0];
+  const a = { x: before.a.x * 150 + 8, y: before.a.y * 150 + 8 };
+  const b = { x: before.b.x * 150 + 8, y: before.b.y * 150 + 8 };
+  const point = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  const movement = 5 / $('#preview-svg').getScreenCTM().a;
+  bridgePointer('pointerdown', point, $('.region-bridge.selected .bridge-hit'));
+  const screen = new w.DOMPoint(point.x, point.y + movement).matrixTransform($('#preview-svg').getScreenCTM());
+  $('#preview-svg').dispatchEvent(new w.PointerEvent('pointermove', { bubbles: true, button: 0, pointerId: 19, clientX: screen.x, clientY: screen.y, altKey: true }));
+  bridgePointer('pointerup', point); await tick();
+  assert(Math.abs(flush().document.regionBridges[0].a.x - before.a.x) < 0.000001, 'Alt did not bypass snapping');
+  await click('#bridge-snap-lines');
+  assert(flush().document.bridgeSnapLines === false);
+  await load('/?workspace=material-editing-tests&live-reload=off');
+  assert(!$('#bridge-snap-lines').checked && flush().document.bridgeSnapLines === false);
+});
 document.querySelector('#summary').textContent = `${document.querySelectorAll('#results li:not(.fail)').length} passed, ${document.querySelectorAll('#results .fail').length} failed`;
 document.title = document.querySelector('.fail') ? 'FAIL — Material checks' : 'PASS — Material checks';
 </script>

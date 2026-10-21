@@ -37,7 +37,7 @@ const defaults = { artworkWidth: 150, channelWidth: 1.5, tabWidth: 3, tabCount: 
 const state = { ...defaults, artwork: null, source: null, example: '', name: 'Bloom.svg', view: 'material', showTabs: true, showOriginal: false, zoom: 1, panX: 0, panY: 0, sourceWarnings: [], result: null, scaled: null, tabLayouts: {}, hiddenContours: [], cutawayContours: [], regions: [], editingRegions: false, selectedRegion: null, drawingRegion: false, regionDraft: [], regionWidth: 0.8, regionTaperLength: 5, regionScope: 'outline-0', editingOutlines: false, selectedOutlines: [], showHiddenOutlines: true, editing: false, adding: false, selectedContour: null, selectedTab: null, selectedTabs: [], selectCurrentOutlineOnly: true };
 const $ = s => document.querySelector(s);
 const htmlText = text => String(text).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
-const materialDefaults = () => ({ ...suggestionDefaults(), areaDecisions: {}, areaSuggestionBasis: null, materialVersion: 1, materialTreatments: {}, materialOrder: [], regionBridges: [], bridgeExclusions: [], bridgeWidth: 3, minimumMaterialWidth: 0.5, bridgeReinforcement: false, bridgeMatchFeatures: true });
+const materialDefaults = () => ({ ...suggestionDefaults(), areaDecisions: {}, areaSuggestionBasis: null, materialVersion: 1, materialTreatments: {}, materialOrder: [], regionBridges: [], bridgeExclusions: [], bridgeWidth: 3, minimumMaterialWidth: 0.5, bridgeReinforcement: false, bridgeMatchFeatures: true, bridgeSnapLines: true, bridgeSnapAngles: true });
 Object.assign(state, { workflowStep: 1, activeTool: 'layers', showBridges: true, reviewingTypes: false, reviewRegion: null, layerQuery: '', layerFilter: 'all', controlsCollapsed: false, sourceChosen: false, areaDecisions: {} }, materialDefaults(), { editingBridges: false, selectedRegionBridge: null, selectedRegionBridges: [] });
 const outlineThumbnails = new WeakMap();
 const outlineBounds = new WeakMap();
@@ -488,9 +488,9 @@ function updateTabEditor() {
   $('#tabs-available').hidden = contours.length === 0;
   $('#add-tab').hidden = !state.editing;
   $('#add-tab').setAttribute('aria-pressed', state.adding);
-  $('#add-tab').textContent = state.adding ? 'Finish Adding' : 'Add Tab';
+  $('#add-tab').textContent = state.adding ? 'Cancel Placement' : 'Add Tabs';
   $('#edit-hint').hidden = !state.editing;
-  $('#edit-hint').textContent = state.adding ? 'Click layers to keep adding tabs at the previewed positions. Choose Finish Adding or press Escape to finish.' : 'Drag tabs to move them. Drag empty space to select a group; Shift adds to the selection.';
+  $('#edit-hint').textContent = state.adding ? 'Click layers to keep adding tabs at the previewed positions. Choose Cancel Placement or press Escape to finish.' : 'Drag tabs to move them. Drag empty space to select a group; Shift adds to the selection.';
   $('#tab-inspector').hidden = !state.editing;
   $('#show-tabs').disabled = false;
   $('#show-tabs').checked = state.showTabs;

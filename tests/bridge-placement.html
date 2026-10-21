@@ -1,0 +1,44 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Bridge placement checks</title>
+<style>body{font:15px system-ui;margin:24px;color:#502c6c;background:#fdfcf8}li{margin:10px 0}.fail{color:#b22}svg{width:850px;max-width:100%;border:1px solid #ddd}h2{font-size:18px}</style>
+<h1>Letter bridge placement</h1><p id="summary">Running…</p><ol id="results"></ol><div id="preview"></div>
+<script src="/vendor/paper-full.min.js"></script><script src="/vendor/clipper.js"></script><script type="module">
+import { importSvg, scaleArtwork } from '/src/import-svg.js';
+import { composeMaterial, generateRegionBridges, pointInMaterial, bridgePolygon } from '/src/material-geometry.js';
+import { pathData } from '/src/geometry.js';
+const assert = (value, message) => { if (!value) throw new Error(message); };
+function check(name, action) {
+  const li = document.createElement('li');
+  try { action(); li.textContent = `PASS — ${name}`; }
+  catch (e) { li.className = 'fail'; li.textContent = `FAIL — ${name}: ${e.message}`; }
+  document.querySelector('#results').append(li);
+}
+// Use the rounded P/r/e artwork, not only rectangular synthetic counters.
+const source = new DOMParser().parseFromString(await (await fetch('/svgs/PhD.svg')).text(), 'image/svg+xml');
+const letters = [...source.querySelectorAll('path')].slice(7, 10).map(p => p.outerHTML).join('');
+const artwork = importSvg(`<svg xmlns="http://www.w3.org/2000/svg">${letters}</svg>`);
+const scaled = scaleArtwork(artwork, 50, 8);
+const options = { sheet: scaled, artworkWidth: 50, padding: 8, bridgeWidth: 3, minimumMaterialWidth: 0.5, materialTreatments: Object.fromEntries(artwork.sourceRegions.map(r => [r.id, 'cut'])) };
+const before = composeMaterial(scaled.contours, [], options);
+const bridges = generateRegionBridges(scaled.contours, [], options);
+const after = composeMaterial(scaled.contours, [], { ...options, regionBridges: bridges });
+check('Rounded P and e counters connect with one valid bridge each', () => {
+  assert(before.unsupported.length === 2, `Expected two counters, got ${before.unsupported.length}`);
+  assert(bridges.length === 2, `Expected two bridges, got ${bridges.length}`);
+  assert(after.unsupported.length === 0 && after.regionBridges.every(b => b.valid), 'Counters did not connect');
+});
+check('Full bridge end caps clear the cut instead of continuing down an adjacent stroke', () => {
+  for (const bridge of bridges) {
+    const polygon = bridgePolygon(bridge);
+    for (const [a, b] of [[polygon[0], polygon[1]], [polygon[2], polygon[3]]]) {
+      for (let i = 0; i <= 100; i++) {
+        const t = i / 100, point = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+        assert(!pointInMaterial(point, before.paths), 'Bridge cap extends into artwork');
+      }
+    }
+  }
+});
+for (const [title, result, showBridges] of [['Source', before, false], ['Automatic bridges', after, true]]) {
+  document.querySelector('#preview').insertAdjacentHTML('beforeend', `<h2>${title}</h2><svg viewBox="0 0 ${scaled.width} ${scaled.height}"><path d="${result.paths.map(pathData).join('')}" fill="#502c6c" fill-rule="nonzero"/>${showBridges ? bridges.map(b => `<path d="${pathData(bridgePolygon(b))}" fill="#f3d58b" fill-opacity="0.6" stroke="#b8862d" stroke-width="0.12"/>`).join('') : ''}</svg>`);
+}
+document.querySelector('#summary').textContent = `${document.querySelectorAll('li:not(.fail)').length} passed, ${document.querySelectorAll('.fail').length} failed`;
+</script>

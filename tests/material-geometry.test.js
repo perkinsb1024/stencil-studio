@@ -5,7 +5,7 @@ import vm from 'node:vm';
 const context = { module: { exports: {} }, navigator: { userAgent: 'node' } };
 vm.runInNewContext(readFileSync(new URL('../vendor/clipper.js', import.meta.url), 'utf8'), context);
 globalThis.ClipperLib = context.module.exports;
-const { snapRegionBridge, composeMaterial, generateRegionBridges, pointInMaterial, scaleBridges, unscaleBridge, bridgeKey } = await import('../src/material-geometry.js');
+const { snapRegionBridge, composeMaterial, generateRegionBridges, pointInMaterial, scaleBridges, unscaleBridge, bridgeKey, bridgePolygon } = await import('../src/material-geometry.js');
 const { generateStencil, measureContour, exportSvg } = await import('../src/geometry.js');
 const rectangle = (x, y, w, h) => [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }];
 const shape = (index, points, extras = {}) => ({ ...measureContour(points, true), id: `outline-${index}`, regionId: `shape-${index}`, fillRule: 'nonzero', ...extras });
@@ -72,6 +72,29 @@ test('automatic bridges connect material and regenerate deterministically', () =
   assert.equal(result.regionBridges[0].valid, true);
   const custom = { ...first[0], id: 'bridge-custom', automatic: false };
   assert.deepEqual(generateRegionBridges([outer, island], [], { ...options, regionBridges: [custom] }), [custom]);
+});
+
+test('automatic bridge caps stop after one stroke without cutting into a nearby stroke', () => {
+  // A counter surrounded by a bowl, with another stroke just beyond the bowl.
+  // The old half-width inset PLUS square cap reached the neighboring stroke.
+  const bowl = shape(0, rectangle(10, 20, 80, 60));
+  const neighboringStrokes = [rectangle(30, 15, 40, 1), rectangle(30, 84, 40, 1), rectangle(5, 30, 1, 40), rectangle(94, 30, 1, 40)];
+  for (const bridgeWidth of [3, 4]) {
+    const settings = { ...options, bridgeWidth };
+    const bridges = generateRegionBridges([bowl, island], neighboringStrokes, settings);
+    assert.equal(bridges.length, 1);
+    const after = composeMaterial([bowl, island], neighboringStrokes, { ...settings, regionBridges: bridges });
+    assert.equal(after.unsupported.length, 0);
+    assert.equal(after.regionBridges[0].valid, true);
+    for (const stroke of neighboringStrokes) {
+      const engine = new ClipperLib.Clipper(), overlap = [];
+      const integer = path => path.map(p => ({ X: Math.round(p.x * 10000), Y: Math.round(p.y * 10000) }));
+      engine.AddPath(integer(bridgePolygon(bridges[0])), ClipperLib.PolyType.ptSubject, true);
+      engine.AddPath(integer(stroke), ClipperLib.PolyType.ptClip, true);
+      engine.Execute(ClipperLib.ClipType.ctIntersection, overlap, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
+      assert.equal(overlap.length, 0, 'A bridge must not alter a second stroke');
+    }
+  }
 });
 
 test('automatic exclusions prevent an identical removed connection from returning', () => {

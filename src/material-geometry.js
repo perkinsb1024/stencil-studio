@@ -55,6 +55,53 @@ export function pointInMaterial(point, paths) {
   return winding !== 0;
 }
 
+// Search geometry is immutable within one generation/snap operation. Keep the
+// prepared rings local to that operation so edits cannot leave stale queries.
+function createBridgeSearch() {
+  const prepared = new WeakMap();
+  function rings(paths) {
+    let result = prepared.get(paths);
+    if (result) return result;
+    result = paths.map(path => {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const p of path) {
+        minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
+        maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
+      }
+      const polygon = integer([path])[0];
+      // rayHits accepts intersections just beyond an edge's endpoints. Expand
+      // the broad-phase bounds by at least the same coordinate tolerance.
+      const epsilon = Math.max(maxX - minX, maxY - minY) * 1e-8 + 1e-8;
+      return { path, polygon, sign: C().Clipper.Orientation(polygon) ? 1 : -1,
+        minX: Math.round(minX * SCALE), minY: Math.round(minY * SCALE),
+        maxX: Math.round(maxX * SCALE), maxY: Math.round(maxY * SCALE),
+        rayMinX: minX - epsilon, rayMinY: minY - epsilon,
+        rayMaxX: maxX + epsilon, rayMaxY: maxY + epsilon };
+    });
+    prepared.set(paths, result);
+    return result;
+  }
+  return {
+    contains(point, paths) {
+      const p = { X: Math.round(point.x * SCALE), Y: Math.round(point.y * SCALE) };
+      let winding = 0;
+      for (const ring of rings(paths)) {
+        if (p.X < ring.minX || p.X > ring.maxX || p.Y < ring.minY || p.Y > ring.maxY) continue;
+        const location = C().Clipper.PointInPolygon(p, ring.polygon);
+        if (location === -1) return true;
+        if (location === 1) winding += ring.sign;
+      }
+      return winding !== 0;
+    },
+    localPaths(origin, direction, extent, paths) {
+      const x = origin.x + direction.x * extent, y = origin.y + direction.y * extent;
+      const minX = Math.min(origin.x, x), minY = Math.min(origin.y, y);
+      const maxX = Math.max(origin.x, x), maxY = Math.max(origin.y, y);
+      return rings(paths).filter(r => r.rayMaxX >= minX && r.rayMinX <= maxX && r.rayMaxY >= minY && r.rayMinY <= maxY).map(r => r.path);
+    },
+  };
+}
+
 export function bridgePolygon(bridge) {
   const { a, b, width } = bridge, length = Math.hypot(b.x - a.x, b.y - a.y);
   if (length < 0.0001) return [];
@@ -168,9 +215,13 @@ function samples(paths) {
   }
   return result;
 }
-function candidatesBetween(first, second, width) {
+function candidatesBetween(first, second, width, cuts, search, cache) {
   const candidates = [];
   function add(from, to) {
+    let targets = cache.get(from);
+    if (!targets) cache.set(from, targets = new Map());
+    if (targets.has(to)) { candidates.push(...targets.get(to)); return; }
+    const start = candidates.length;
     for (const p of samples(from.paths)) {
       let nearest = null, distance = Infinity;
       for (const path of to.paths) {
@@ -183,13 +234,53 @@ function candidatesBetween(first, second, width) {
       }
       if (!nearest || distance < 0.0001) continue;
       const dx = (nearest.x - p.x) / distance, dy = (nearest.y - p.y) / distance;
-      const inset = width / 2 + 0.02;
+      const inset = 0.02;
       const a = { x: p.x - dx * inset, y: p.y - dy * inset }, b = { x: nearest.x + dx * inset, y: nearest.y + dy * inset };
-      if (pointInMaterial(a, from.paths) && pointInMaterial(b, to.paths)) candidates.push({ a, b, width, distance, designScore: distance + (p.corner ? width * 4 : 0) });
+      if (search.contains(a, from.paths) && search.contains(b, to.paths)) {
+        const candidate = fitSingleStrokeBridge({ a, b, width, distance, designScore: distance + (p.corner ? width * 4 : 0) }, cuts, search);
+        if (candidate) candidates.push(candidate);
+      }
     }
+    // Retain both directions and their original order, including score ties.
+    // Only the repeated work is skipped when the pair is visited in reverse.
+    targets.set(to, candidates.slice(start));
   }
   add(first, second); add(second, first);
   return candidates.sort((a, b) => a.designScore - b.designScore).slice(0, 8);
+}
+
+// Test the whole strip, including its square caps. A centerline alone can
+// cross a bowl cleanly while a side of the bridge bites into the letter's stem.
+function fitSingleStrokeBridge(bridge, cuts, search, trim = true) {
+  if (bridge.control) return bridge;
+  const { a, b, width } = bridge, length = Math.hypot(b.x - a.x, b.y - a.y);
+  if (length < 0.0001) return null;
+  const u = { x: (b.x - a.x) / length, y: (b.y - a.y) / length }, radius = width / 2;
+  const origin = { x: a.x - u.x * radius, y: a.y - u.y * radius }, extent = length + width;
+  let entry = Infinity, exit = -Infinity;
+  for (const fraction of [-1, -0.66, -0.33, 0, 0.33, 0.66, 1]) {
+    const p = { x: origin.x - u.y * radius * fraction, y: origin.y + u.x * radius * fraction };
+    const breaks = [0, ...rayHits(p, u, search.localPaths(p, u, extent, cuts)).filter(t => t < extent), extent]
+      .filter((t, i, values) => !i || t - values[i - 1] > 0.0001);
+    const intervals = [];
+    for (let i = 1; i < breaks.length; i++) {
+      const t = (breaks[i - 1] + breaks[i]) / 2;
+      if (search.contains({ x: p.x + u.x * t, y: p.y + u.y * t }, cuts)) {
+        if (intervals.length && Math.abs(intervals.at(-1)[1] - breaks[i - 1]) < 0.0001) intervals.at(-1)[1] = breaks[i];
+        else intervals.push([breaks[i - 1], breaks[i]]);
+      }
+    }
+    // Both caps must finish in material, with just one cut between them.
+    if (intervals.length !== 1 || intervals[0][0] < 0.001 || intervals[0][1] > extent - 0.001) return null;
+    entry = Math.min(entry, intervals[0][0]); exit = Math.max(exit, intervals[0][1]);
+  }
+  // Stop close to the crossed stroke instead of carrying long anchors through
+  // neighboring features. Keep enough overlap for reliable boolean attachment.
+  if (!trim) return bridge;
+  const fitted = { ...bridge,
+    a: { x: origin.x + u.x * (entry - 0.02), y: origin.y + u.y * (entry - 0.02) },
+    b: { x: origin.x + u.x * (exit + 0.02), y: origin.y + u.y * (exit + 0.02) } };
+  return fitSingleStrokeBridge(fitted, cuts, search, false);
 }
 
 function rayHits(origin, direction, paths) {
@@ -208,7 +299,7 @@ function rayHits(origin, direction, paths) {
 
 // Extend the centerline of an existing elongated feature, rather than attaching
 // a short diagonal strip to whichever corner happens to be closest.
-function featureCandidates(contours, material, options) {
+function featureCandidates(contours, material, options, search) {
   const candidates = [], fallbackWidth = options.bridgeWidth ?? 3;
   for (const contour of contours) {
     if (!contour.closed || materialMode(contour, options) !== 'keep' || options.hiddenContours?.includes(contour.id)) continue;
@@ -220,7 +311,7 @@ function featureCandidates(contours, material, options) {
     const low = Math.min(...along), high = Math.max(...along), bottom = Math.min(...across), top = Math.max(...across), thickness = top - bottom;
     if (high - low >= thickness * 2.5 && longest.length >= (high - low) * 0.45) {
       const center = { x: u.x * (low + high) / 2 + v.x * (bottom + top) / 2, y: u.y * (low + high) / 2 + v.y * (bottom + top) / 2 };
-      const component = material.components.find(c => pointInMaterial(center, c.paths));
+      const component = material.components.find(c => search.contains(center, c.paths));
       if (component && !component.sheetConnected) {
         const width = options.bridgeMatchFeatures === false ? fallbackWidth : Math.max(0.5, options.minimumMaterialWidth ?? 0.5, Math.min(15, thickness));
         for (const sign of [-1, 1]) {
@@ -231,14 +322,14 @@ function featureCandidates(contours, material, options) {
             if (!entry) continue;
             const a = { x: center.x + direction.x * Math.max(0, exit - width / 2), y: center.y + direction.y * Math.max(0, exit - width / 2) };
             const b = { x: center.x + direction.x * (entry + width / 2), y: center.y + direction.y * (entry + width / 2) };
-            if (!pointInMaterial(a, component.paths) || !pointInMaterial(b, target.paths)) continue;
+            if (!search.contains(a, component.paths) || !search.contains(b, target.paths)) continue;
             const distance = entry - exit;
             candidates.push({ a, b, width, distance, designScore: distance * 0.3 + width * 0.1, placement: 'feature' });
           }
         }
       }
     }
-    candidates.push(...arcCandidates(contour, material, options));
+    candidates.push(...arcCandidates(contour, material, options, search));
   }
   return candidates;
 }
@@ -246,7 +337,7 @@ function featureCandidates(contours, material, options) {
 // Fit a medial circular arc to a narrow curved source feature. The fit is only
 // a candidate: endpoint membership and final polygon connectivity still decide
 // whether the proposed continuation can be used.
-function arcCandidates(contour, material, options) {
+function arcCandidates(contour, material, options, search) {
   if (options.bridgeMatchFeatures === false || contour.points.length < 12) return [];
   const vertices = contour.points.slice(0, -1), corners = [];
   for (let i = 0; i < vertices.length; i++) {
@@ -290,17 +381,17 @@ function arcCandidates(contour, material, options) {
   const width = Math.max(0.5, options.minimumMaterialWidth ?? 0.5, thickness), result = [];
   for (const [end, sign] of [[first, -1], [first + span, 1]]) {
     const start = end - sign * width / radius, a = point(start);
-    const component = material.components.find(c => !c.sheetConnected && pointInMaterial(a, c.paths));
+    const component = material.components.find(c => !c.sheetConnected && search.contains(a, c.paths));
     if (!component) continue;
     let outside = false;
     for (let delta = width / radius; delta < Math.PI / 2; delta += 0.025) {
       const angle = start + sign * delta, p = point(angle);
-      if (pointInMaterial(p, component.paths)) continue;
+      if (search.contains(p, component.paths)) continue;
       outside = true;
-      const target = material.components.find(c => c !== component && pointInMaterial(p, c.paths));
+      const target = material.components.find(c => c !== component && search.contains(p, c.paths));
       if (!target || !outside) continue;
       const finish = angle + sign * width / radius, b = point(finish), mid = point((start + finish) / 2);
-      if (!pointInMaterial(b, target.paths)) continue;
+      if (!search.contains(b, target.paths)) continue;
       const control = { x: 2 * mid.x - (a.x + b.x) / 2, y: 2 * mid.y - (a.y + b.y) / 2 };
       const distance = Math.abs(finish - start) * radius;
       result.push({ a, b, control, width, distance, designScore: distance * 0.28 + width * 0.1, placement: 'curve' }); break;
@@ -324,12 +415,13 @@ export function bridgeKey(bridge, artworkWidth, padding) {
 // Fit an existing bridge using the same feature continuations as generation.
 // Inspect the artwork without bridges so already-supported features remain available.
 export function snapRegionBridge(contours, channelCuts, options, bridge) {
+  const search = createBridgeSearch();
   const material = composeMaterial(contours, channelCuts, { ...options, regionBridges: [] });
-  const componentAt = p => material.components.findIndex(c => pointInMaterial(p, c.paths));
+  const componentAt = p => material.components.findIndex(c => search.contains(p, c.paths));
   const first = componentAt(bridge.a), second = componentAt(bridge.b);
   if (first < 0 || second < 0 || first === second) return null;
   const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-  const candidates = featureCandidates(contours, material, { ...options, bridgeMatchFeatures: true })
+  const candidates = featureCandidates(contours, material, { ...options, bridgeMatchFeatures: true }, search)
     .filter(c => componentAt(c.a) === first && componentAt(c.b) === second || componentAt(c.a) === second && componentAt(c.b) === first)
     .map(c => ({ ...c, displacement: Math.min(distance(c.a, bridge.a) + distance(c.b, bridge.b), distance(c.b, bridge.a) + distance(c.a, bridge.b)) }))
     .filter(c => c.displacement <= distance(bridge.a, bridge.b) + Math.max(bridge.width, c.width) * 4)
@@ -352,6 +444,7 @@ export function snapRegionBridge(contours, channelCuts, options, bridge) {
 // the boolean geometry, rather than assuming its graph edge makes a connection.
 export function generateRegionBridges(contours, channelCuts, options, onProgress = () => {}) {
   onProgress(0);
+  const search = createBridgeSearch();
   let bridges = [...(options.regionBridges ?? []).filter(b => !b.automatic)];
   let result = composeMaterial(contours, channelCuts, { ...options, regionBridges: bridges });
   const initialConnections = Math.max(1, result.components.length - 1);
@@ -361,12 +454,15 @@ export function generateRegionBridges(contours, channelCuts, options, onProgress
   for (let iteration = 0; iteration < 100 && bridges.length < 100; iteration++) {
     onProgress(0.05 + 0.7 * (1 - Math.max(0, result.components.length - 1) / initialConnections));
     if (result.components.length <= 1) break;
-    const candidates = featureCandidates(contours, result, options);
+    const candidates = featureCandidates(contours, result, options, search).map(b => fitSingleStrokeBridge(b, result.paths, search)).filter(Boolean);
+    // Components and cuts change after acceptance; pair results belong only
+    // to this iteration (with its fixed bridge width and material geometry).
+    const candidateCache = new Map();
     for (const component of result.components) {
       const others = result.components.filter(c => c !== component).sort((a, b) => componentDistance(component, a) - componentDistance(component, b));
       const targets = [...new Set([...others.slice(0, 3), ...others.filter(c => c.sheetConnected).slice(0, 2)])];
       for (const target of targets) {
-        candidates.push(...candidatesBetween(component, target, width));
+        candidates.push(...candidatesBetween(component, target, width, result.paths, search, candidateCache));
       }
     }
     let accepted = false;
@@ -387,10 +483,11 @@ export function generateRegionBridges(contours, channelCuts, options, onProgress
     // Retain one additional separated connection per original unsupported area.
     const original = composeMaterial(contours, channelCuts, { ...options, regionBridges: options.regionBridges?.filter(b => !b.automatic) ?? [] });
     const islands = original.unsupported.slice(0, 50);
+    const candidateCache = new Map();
     for (const [index, island] of islands.entries()) {
       onProgress(0.75 + 0.2 * index / islands.length);
       const targets = original.components.filter(c => c.sheetConnected);
-      const candidates = [...featureCandidates(contours, original, options).filter(b => pointInMaterial(b.a, island.paths)), ...targets.flatMap(target => candidatesBetween(island, target, width))].sort((a, b) => a.designScore - b.designScore);
+      const candidates = [...featureCandidates(contours, original, options, search).filter(b => search.contains(b.a, island.paths)).map(b => fitSingleStrokeBridge(b, original.paths, search)).filter(Boolean), ...targets.flatMap(target => candidatesBetween(island, target, width, original.paths, search, candidateCache))].sort((a, b) => a.designScore - b.designScore);
       for (const candidate of candidates) {
         if (bridges.length >= 100) break;
         const key = bridgeKey(candidate, options.artworkWidth, options.padding);

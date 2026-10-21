@@ -1,5 +1,6 @@
 import { scaleBridges, unscaleBridge, pointInMaterial, bridgeKey, bridgePolygon } from './material-geometry.js';
 import { pathData } from './geometry.js';
+import { bridgeSnapLines, snapBridgeToLines, snapBridgeToAngles } from './bridge-snapping.js';
 
 const widthControl = (id, label, min, value = '') => `<div class="control"><div class="control-label"><label for="${id}">${label}</label><div class="number-unit"><input id="${id}" type="number" min="${min}" max="15" step="0.1" value="${value}" /><span>mm</span></div></div><input id="${id}-range" type="range" min="${min}" max="15" step="0.1" value="${value || min}" aria-label="${id === 'selected-bridge-width' ? 'Selected Bridge Width' : label} Slider" /></div>`;
 
@@ -7,10 +8,14 @@ export const bridgePanel = `
 <section class="bridge-inspector editing-panel" id="bridge-inspector" aria-label="Material Bridges" hidden>
   <div class="tab-inspector-heading"><h2>Bridges</h2><span id="bridge-support" class="badge"></span></div>
   <p class="panel-description">Bridges connect separate pieces of retained material to the sheet.</p>
-  <div class="region-actions"><button id="generate-bridges" class="primary-button">Generate Bridges</button><button id="add-bridge" class="small-button" aria-pressed="false">Add Bridge</button></div>
+  <div class="region-actions"><button id="generate-bridges" class="primary-button">Generate Bridges</button><button id="add-bridge" class="small-button" aria-pressed="false">Add Bridges</button></div>
   <p id="bridge-hint" class="edit-hint" role="status"></p>
   <div class="bridge-fields">${widthControl('bridge-width', 'Bridge Width', 0.5, 3)}<label class="check-label"><input id="bridge-match-features" type="checkbox" checked /><span>Match Artwork Features</span></label></div>
   <p class="control-hint">Automatic bridges follow nearby features and match their widths when possible. Custom bridges are preserved.</p>
+  <label class="check-label"><input id="bridge-snap-lines" type="checkbox" checked /><span>Snap to Nearby Lines</span></label>
+  <p class="control-hint">Align straight bridge edges and angles while dragging. Hold Alt/Option to move freely.</p>
+  <label class="check-label"><input id="bridge-snap-angles" type="checkbox" checked /><span>Snap to Horizontal, Vertical & 45°</span></label>
+  <p class="control-hint">Snap straight bridges within 5° while placing or dragging. The nearest snap wins; nearby lines win ties. Hold Alt/Option to move freely.</p>
   <label class="field">Bridge<select id="bridge-picker" aria-label="Select Material Bridge"></select></label>
   <div id="bridge-selection" hidden><h3 id="bridge-selection-title">Selected Bridge</h3><div class="bridge-fields">${widthControl('selected-bridge-width', 'Bridge Width', 0.5)}<label class="check-label"><input id="selected-bridge-curved" type="checkbox" disabled /><span>Curved Bridge</span></label></div><p id="bridge-curve-hint" class="control-hint" hidden>Drag the bend handle to follow the artwork.</p><div class="region-actions"><button id="snap-bridge" class="small-button" disabled>Snap to Artwork</button><button id="remove-bridge" class="small-button danger" disabled>Remove Bridge</button></div></div>
   <details class="panel-details"><summary>Advanced</summary><div class="bridge-fields">${widthControl('minimum-material-width', 'Minimum Material Width', 0.1, 0.5)}<label class="check-label"><input id="bridge-reinforcement" type="checkbox" /><span>Add Reinforcement</span></label></div><button id="clear-bridge-exclusions" class="small-button" disabled>Allow Removed Connections</button><p class="control-hint">Allow previously removed automatic connections to be generated again.</p></details>
@@ -95,7 +100,7 @@ export function createBridgeEditor({ state, render, mutate, snapshot, restore, r
     $('#edit-bridges').setAttribute('aria-pressed', state.editingBridges);
     $('#edit-bridges').setAttribute('aria-expanded', state.editingBridges);
     $('#bridge-support').textContent = state.result.components ? state.result.unsupported.length ? `${state.result.unsupported.length} Unsupported` : state.result.narrowConnections || state.result.regionBridges?.some(bridge => !bridge.valid) || state.result.components.filter(component => component.sheetConnected).length > 1 ? 'Material Needs Attention' : 'All Material Connected' : 'Not Checked';
-    $('#bridge-hint').textContent = adding ? (start ? 'Choose the second anchor in retained material.' : 'Choose the first anchor in retained material.') : bridges.length ? `${bridges.length} selected. Drag a bridge to move it or its handles to adjust it; Shift adds to the selection.` : 'Select or drag a bridge, or drag a rectangle to select several.';
+    $('#bridge-hint').textContent = adding ? (start ? 'Choose the second anchor in retained material. Cancel Placement or Escape stops adding.' : 'Choose the first anchor in retained material. Keep placing bridges; Cancel Placement or Escape stops adding.') : bridges.length ? `${bridges.length} selected. Drag a bridge to move it or its handles to adjust it; Shift adds to the selection.` : 'Select or drag a bridge, or drag a rectangle to select several.';
     $('#generate-bridges').textContent = state.regionBridges.some(bridge => bridge.automatic) ? 'Regenerate Bridges' : 'Generate Bridges';
     $('#bridge-selection').hidden = !bridges.length;
     $('#bridge-selection-title').textContent = bridges.length > 1 ? `${bridges.length} Bridges Selected` : 'Selected Bridge';
@@ -104,6 +109,8 @@ export function createBridgeEditor({ state, render, mutate, snapshot, restore, r
     $('#minimum-material-width').value = state.minimumMaterialWidth;
     $('#bridge-reinforcement').checked = state.bridgeReinforcement;
     $('#bridge-match-features').checked = state.bridgeMatchFeatures;
+    $('#bridge-snap-lines').checked = state.bridgeSnapLines !== false;
+    $('#bridge-snap-angles').checked = state.bridgeSnapAngles !== false;
     $('#selected-bridge-curved').disabled = !selected();
     $('#selected-bridge-curved').checked = bridges.length > 0 && bridges.every(b => b.control);
     $('#selected-bridge-curved').indeterminate = bridges.some(b => b.control) && !bridges.every(b => b.control);
@@ -126,8 +133,8 @@ export function createBridgeEditor({ state, render, mutate, snapshot, restore, r
     $('#remove-bridge').disabled = !selected();
     $('#remove-bridge').textContent = bridges.length > 1 ? `Remove ${bridges.length} Bridges` : 'Remove Bridge';
     $('#clear-bridge-exclusions').disabled = !state.bridgeExclusions.length;
-    $('#add-bridge').disabled = state.regionBridges.length >= 100;
-    $('#add-bridge').textContent = adding ? 'Cancel Placement' : 'Add Bridge';
+    $('#add-bridge').disabled = !adding && state.regionBridges.length >= 100;
+    $('#add-bridge').textContent = adding ? 'Cancel Placement' : 'Add Bridges';
     $('#add-bridge').setAttribute('aria-pressed', adding);
     svg.classList.toggle('editing-bridges', state.editingBridges);
     svg.classList.toggle('adding-bridge', state.editingBridges && adding);
@@ -180,6 +187,8 @@ export function createBridgeEditor({ state, render, mutate, snapshot, restore, r
   }
   $('#bridge-reinforcement').addEventListener('change', e => mutate(() => { state.bridgeReinforcement = e.target.checked; }));
   $('#bridge-match-features').addEventListener('change', e => mutate(() => { state.bridgeMatchFeatures = e.target.checked; }));
+  $('#bridge-snap-lines').addEventListener('change', e => mutate(() => { state.bridgeSnapLines = e.target.checked; }));
+  $('#bridge-snap-angles').addEventListener('change', e => mutate(() => { state.bridgeSnapAngles = e.target.checked; }));
   $('#selected-bridge-curved').addEventListener('change', e => {
     if (!selected()) return;
     mutate(() => {
@@ -210,14 +219,16 @@ export function createBridgeEditor({ state, render, mutate, snapshot, restore, r
   }
   svg.addEventListener('pointerdown', e => {
     if (!state.editingBridges || e.button !== 0 || e.defaultPrevented || gesture) return;
-    const point = svgPoint(e); if (!point) return;
+    let point = svgPoint(e); if (!point) return;
     commit();
     if (adding) {
+      if (state.regionBridges.length >= 100) return notify('You can add up to 100 bridges. Remove a bridge before adding another.', 'warning');
+      if (start && state.bridgeSnapAngles !== false && !e.altKey) point = snapBridgeToAngles({ a: start, b: point }, 'b').b;
       if (!pointInMaterial(point, state.result.retainedMaterial ?? [])) return notify('Place each endpoint inside white retained material.', 'warning');
       if (!start) { start = point; render(); return; }
       if (Math.hypot(point.x - start.x, point.y - start.y) < 0.1) return;
       const bridge = { id: `bridge-${crypto.randomUUID()}`, a: toArtwork(start), b: toArtwork(point), width: state.bridgeWidth, automatic: false };
-      adding = false; start = null;
+      start = null;
       mutate(() => { state.regionBridges.push(bridge); selectBridge(bridge.id); });
       e.preventDefault(); return;
     }
@@ -233,6 +244,10 @@ export function createBridgeEditor({ state, render, mutate, snapshot, restore, r
         start: point, original: structuredClone(selected()), x: e.clientX, y: e.clientY, moved: false };
     } else if (!target) {
       gesture = { kind: 'box', pointerId: e.pointerId, start: point, point, x: e.clientX, y: e.clientY, moved: false, previous, anchor, additive: e.shiftKey };
+    }
+    if (gesture && gesture.kind !== 'box') {
+      gesture.raw = structuredClone(selected());
+      gesture.snapLines = bridgeSnapLines(state.result.baseCuts ?? [], screenUnit() * 8);
     }
     if (gesture && e.isTrusted) svg.setPointerCapture(e.pointerId);
     e.preventDefault();
@@ -272,7 +287,23 @@ export function createBridgeEditor({ state, render, mutate, snapshot, restore, r
         bridge[end] = { x: original[end].x + dx, y: original[end].y + dy };
       }
     } else {
+      // Always start from the unsnapped bridge so a snapped angle cannot
+      // accumulate or pull the opposite anchor farther with each pointer event.
+      Object.assign(bridge, structuredClone(gesture.raw));
       bridge[gesture.end] = toArtwork({ x: Math.max(0, Math.min(state.scaled.width, p.x)), y: Math.max(0, Math.min(state.scaled.height, p.y)) });
+    }
+    if ((state.bridgeSnapLines !== false || state.bridgeSnapAngles !== false) && !e.altKey) {
+      const physical = scaleBridges([bridge], state.artworkWidth, state.scaled.padding)[0];
+      const angled = state.bridgeSnapAngles !== false ? snapBridgeToAngles(physical, gesture.end) : physical;
+      const lined = state.bridgeSnapLines !== false ? snapBridgeToLines(physical, gesture.snapLines, screenUnit() * 8, gesture.end) : physical;
+      const inSheet = candidate => [candidate.a, candidate.b].every(p => p.x >= 0 && p.y >= 0 && p.x <= state.scaled.width && p.y <= state.scaled.height);
+      // Compare both candidates against the raw drag, so snapping does not
+      // compound. Ignore candidates that would move an anchor off the sheet.
+      const movement = candidate => candidate === physical || !inSheet(candidate) ? Infinity : Math.max(...['a', 'b'].map(end => Math.hypot(candidate[end].x - physical[end].x, candidate[end].y - physical[end].y)));
+      const snapped = movement(lined) <= movement(angled) ? lined : angled;
+      if (snapped !== physical && [snapped.a, snapped.b].every(p => p.x >= 0 && p.y >= 0 && p.x <= state.scaled.width && p.y <= state.scaled.height)) {
+        Object.assign(bridge, unscaleBridge(snapped, state.artworkWidth, state.scaled.padding));
+      }
     }
     bridge.automatic = false; scheduleGesture();
   });
@@ -283,8 +314,9 @@ export function createBridgeEditor({ state, render, mutate, snapshot, restore, r
     if (state.editingBridges && e.detail === 0 && e.target.closest('[data-material-bridge]')) { selectBridge(e.target.closest('[data-material-bridge]').dataset.materialBridge, e.shiftKey); render(); }
   });
   document.addEventListener('keydown', e => {
-    if (!state.editingBridges || e.defaultPrevented || e.target.closest('input,select,textarea,[contenteditable]')) return;
-    if (e.key === 'Escape') { e.preventDefault(); cancel(); render(); }
+    if (!state.editingBridges || e.defaultPrevented) return;
+    if (e.key === 'Escape') { e.preventDefault(); cancel(); render(); return; }
+    if (e.target.closest('input,select,textarea,[contenteditable]')) return;
     const marker = e.target.closest('[data-material-bridge]');
     if (marker && ['Enter', ' '].includes(e.key)) {
       e.preventDefault(); selectBridge(marker.dataset.materialBridge, e.shiftKey); render();
