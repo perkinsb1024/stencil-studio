@@ -1,18 +1,19 @@
+import { createBusyTask } from './busy-task.js';
 import { updateWorkspaceUI, updatePanHint } from './workspace-ui.js';
 import { pendingTypeReviews, typeReviewIds, decideLayerType } from './type-review.js';
 import { workspaceView } from './workspace-view.js';
 import { createOrderedList, orderControls } from './ordered-list.js';
 import { scaleRegions } from './regions.js';
 import { createRegionEditor } from './region-editor.js';
-import { importSvg, scaleArtwork, examples } from './import-svg.js';
-import { generateStencil, pathData, exportSvg } from './geometry.js';
-import { customizeContour, nearestOnContour } from './tab-layout.js';
+import { importSvg, examples } from './import-svg.js';
+import { at, pathData, exportSvg } from './geometry.js';
+import { customizeContour, nearestOnContour, resolveTabs } from './tab-layout.js';
 import { workspaceKey, readWorkspace, writeWorkspace } from './workspace-storage.js';
 import { createSimplifyEditor } from './simplify-editor.js';
 import { createPreviewPan } from './preview-pan.js';
 import { createBridgeEditor, bridgePanel } from './bridge-editor.js';
 import { materialMode, scaleBridges } from './material-geometry.js';
-import { suggestAreas, applyAreaSuggestions, suggestionDefaults, treatmentLabel } from './area-suggestions.js';
+import { suggestionDefaults, treatmentLabel } from './area-suggestions.js';
 
 const icons = {
   upload: '<path d="M12 16V4m-4 4 4-4 4 4M4 15v5h16v-5"/>',
@@ -60,12 +61,72 @@ function notify(message, kind = 'success') {
   if (kind === 'success') noticeTimer = setTimeout(() => { el.hidden = true; }, 6000);
 }
 
+let geometryKey = null, geometryArtwork = null, detectAreas = false, completedWorkspace = null, detectionBefore = null;
+const busy = createBusyTask({
+  root: $('#app'), overlay: $('#preview-busy'), stage: $('#canvas-viewport'),
+  onCancel() { rollbackGeneration(); notify('Calculation cancelled. Previous stencil restored.'); },
+  onError(message) { rollbackGeneration(); notify(message, 'error'); },
+});
+function geometrySettings() {
+  const keys = [...Object.keys(defaults), 'tabLayouts', 'hiddenContours', 'cutawayContours', 'regions',
+    'materialTreatments', 'materialOrder', 'regionBridges', 'bridgeExclusions', 'bridgeWidth',
+    'minimumMaterialWidth', 'bridgeReinforcement', 'bridgeMatchFeatures', 'areaOverrides'];
+  return { ...Object.fromEntries(keys.map(key => [key, state[key]])), analyzeMaterial: state.editingBridges || state.workflowStep === 3 };
+}
+function geometryGestureActive() { return Boolean(drag || regionEditor.dragging || bridgeEditor.dragging); }
+function rememberCompletedWorkspace() {
+  if (busy.active || geometryGestureActive()) return;
+  const { artwork, result, scaled, ...rest } = state;
+  completedWorkspace = { state: { ...structuredClone(rest), artwork, result, scaled }, history: history.serialize(), pendingSettings: structuredClone(pendingSettings) };
+  queueWorkspaceSave();
+}
+function rollbackGeneration() {
+  cancelAnimationFrame(renderFrame); pendingSettings = null; positionGesture = null; detectAreas = false; detectionBefore = null;
+  if (completedWorkspace) {
+    Object.assign(state, structuredClone({ ...completedWorkspace.state, artwork: null, result: null, scaled: null }),
+      { artwork: completedWorkspace.state.artwork, result: completedWorkspace.state.result, scaled: completedWorkspace.state.scaled });
+    history.hydrate(completedWorkspace.history);
+    pendingSettings = structuredClone(completedWorkspace.pendingSettings);
+  } else {
+    state.artwork = null; state.source = null; state.result = null; state.scaled = null;
+    history.clear();
+  }
+  syncSourceInputs(); syncSettingInputs();
+  $('#layer-search').value = state.layerQuery; $('#layer-filter').value = state.layerFilter;
+  render();
+}
 function render() {
-  if (!state.artwork) return;
+  if (!state.artwork || busy.active) return;
   syncEditingFlags();
-  const padding = Math.max(state.margin, Math.max(state.channelWidth, ...state.regions.map(r => r.width)) / 2 + 2);
-  state.scaled = { ...scaleArtwork(state.artwork, state.artworkWidth, padding), padding, regions: scaleRegions(state.regions, state.artworkWidth, padding) };
-  state.result = generateStencil(state.scaled.contours, { ...state, regions: state.scaled.regions, sheet: state.scaled, analyzeMaterial: state.editingBridges || state.workflowStep === 3, regionBridges: scaleBridges(state.regionBridges, state.artworkWidth, padding) });
+  const settings = geometrySettings(), key = JSON.stringify(settings);
+  const geometryChanged = detectAreas || geometryArtwork !== state.artwork || geometryKey !== key;
+  if (geometryChanged && geometryGestureActive()) {
+    // Keep handles responsive during a drag; rebuild cut polygons on release.
+    state.scaled = { ...state.scaled, regions: scaleRegions(state.regions, state.artworkWidth, state.scaled.padding) };
+    if (state.editing) {
+      const tabs = new Map(state.scaled.contours.map(contour => [contour.id, resolveTabs(contour, state, state.tabLayouts[contour.id])]));
+      state.result = { ...state.result, bridges: state.result.bridges.map(bridge => {
+        const tab = tabs.get(bridge.contourId)?.find(tab => tab.id === bridge.id);
+        const contour = state.scaled.contours.find(contour => contour.id === bridge.contourId);
+        return tab ? { ...bridge, ...tab, point: at(contour, tab.center) } : bridge;
+      }) };
+    }
+  } else if (geometryChanged) {
+    const artwork = state.artwork, detecting = detectAreas;
+    busy.run('stencil', { artwork, settings, detectAreas: detecting },
+      detecting ? 'Detecting layer types…' : settings.analyzeMaterial ? 'Analyzing stencil material…' : 'Generating tabs and channels…',
+      ({ scaled, stencil, suggestions, ...treatments }) => {
+        state.scaled = scaled; state.result = stencil;
+        if (suggestions) {
+          Object.assign(state, treatments, { areaSuggestions: suggestions });
+          state.areaSuggestionBasis = { artworkWidth: state.artworkWidth, channelWidth: state.channelWidth, minimumMaterialWidth: state.minimumMaterialWidth };
+        }
+        if (detectionBefore) { history.record(detectionBefore); detectionBefore = null; }
+        detectAreas = false; geometryArtwork = artwork; geometryKey = JSON.stringify(geometrySettings());
+        render();
+      });
+    return;
+  }
   const { width, height, contours, artworkHeight } = state.scaled;
   const visible = visibleContours();
   const tabContours = channelContours();
@@ -106,13 +167,13 @@ function render() {
   $('#offset-value').textContent = `${state.tabOffset}%`;
   updateWorkspaceUI(state);
   fitSheet();
+  updateHistoryButtons();
+  if (!geometryChanged) queueMicrotask(rememberCompletedWorkspace);
 }
 
 function refreshAreaSuggestions() {
-  const padding = Math.max(state.margin, Math.max(state.channelWidth, ...state.regions.map(r => r.width)) / 2 + 2);
-  state.areaSuggestions = suggestAreas(state.artwork, { ...state, padding, regions: scaleRegions(state.regions, state.artworkWidth, padding), regionBridges: scaleBridges(state.regionBridges, state.artworkWidth, padding) });
-  applyAreaSuggestions(state, state.artwork, state.areaSuggestions);
-  state.areaSuggestionBasis = { artworkWidth: state.artworkWidth, channelWidth: state.channelWidth, minimumMaterialWidth: state.minimumMaterialWidth };
+  detectAreas = true;
+  state.areaSuggestionBasis = null;
 }
 function markAreaOverrides(ids) {
   for (const c of state.artwork.contours) if (ids.includes(c.id)) { state.areaOverrides[c.regionId] = true; state.areaDecisions[c.regionId] = 'manual'; }
@@ -506,7 +567,7 @@ function updateSelectedTab(property, value, live = false) {
   else { mutate(apply); positionGesture = null; }
 }
 const regionEditor = createRegionEditor({ state, render, mutate, snapshot, restore, record: before => history.record(before), beginEdit: () => { if (!pendingSettings) pendingSettings = snapshot(); }, commit: commitSettings, save: queueWorkspaceSave, notify, svgPoint, screenUnit });
-const bridgeEditor = createBridgeEditor({ state, render, mutate, snapshot, restore, record: before => history.record(before), commit: commitSettings, save: queueWorkspaceSave, notify, svgPoint, screenUnit });
+const bridgeEditor = createBridgeEditor({ state, render, mutate, snapshot, restore, record: before => history.record(before), commit: commitSettings, save: queueWorkspaceSave, notify, svgPoint, screenUnit, runTask: (task, payload, label, complete) => busy.run(task, payload, label, complete) });
 const simplifyEditor = createSimplifyEditor({
   state, commit: commitWorkspaceEdits, download: downloadFile,
   apply(source) {
@@ -838,6 +899,7 @@ function finishDrag(event, cancelled = false) {
   } else if (cancelled && finished.moved) restore(finished.before);
   else if (finished.moved && finished.kind === 'tabs') history.record(finished.before);
   if (preview.hasPointerCapture(event.pointerId)) preview.releasePointerCapture(event.pointerId);
+  if (!cancelled && finished.moved && finished.kind === 'tabs') render();
 }
 preview.addEventListener('pointerup', e => finishDrag(e));
 preview.addEventListener('pointercancel', e => finishDrag(e, true));
@@ -986,13 +1048,17 @@ function restore(saved) {
   syncSettingInputs(); render(); updateHistoryButtons();
 }
 function updateHistoryButtons() {
+  if (busy.active) { queueWorkspaceSave(); return; }
   $('#undo').disabled = !history.canUndo; $('#redo').disabled = !history.canRedo;
   queueWorkspaceSave();
 }
 function commitSettings() { positionGesture = null; if (pendingSettings) { history.record(pendingSettings); pendingSettings = null; } queueWorkspaceSave(); }
 function mutate(action) {
   commitSettings(); cancelAnimationFrame(renderFrame);
-  const before = snapshot(); action(); render(); history.record(before);
+  const before = snapshot(); action();
+  if (detectAreas) detectionBefore = before;
+  render();
+  if (!detectAreas) history.record(before);
 }
 function scheduleRender() { cancelAnimationFrame(renderFrame); renderFrame = requestAnimationFrame(render); }
 function syncSettingInputs() {
@@ -1099,9 +1165,9 @@ function captureWorkspace() {
     focus: document.activeElement?.id || null,
   };
 }
-function saveWorkspace() {
+function saveWorkspace(force = false) {
   clearTimeout(workspaceSaveTimer);
-  if (!state.source) return;
+  if (!state.source || busy.active && !force) return;
   const saved = captureWorkspace();
   let result;
   try { result = writeWorkspace(localStorage, saved, storageKey()); }
@@ -1151,6 +1217,7 @@ function restoreWorkspace() {
     // Older snapshots share the workspace source. Bind it now so Undo can
     // cross a later artwork replacement without losing that original SVG.
     history.hydrate(Object.fromEntries(['past', 'future'].map(key => [key, saved.history[key].map(entry => ({ source: saved.source, name: saved.name, example: saved.example ?? '', ...entry }))])));
+    if (!state.areaSuggestions) refreshAreaSuggestions();
     render();
     requestAnimationFrame(() => {
       const focus = typeof saved.focus === 'string' ? document.getElementById(saved.focus) : null;
@@ -1173,7 +1240,8 @@ function commitWorkspaceEdits() {
 }
 function flushWorkspace() {
   commitWorkspaceEdits();
-  saveWorkspace();
+  // Persist edits on reload even if their preview is still being calculated.
+  saveWorkspace(true);
 }
 window.addEventListener('stencil:before-reload', flushWorkspace);
 window.addEventListener('pagehide', flushWorkspace);

@@ -1,3 +1,4 @@
+import { createBusyTask } from './busy-task.js';
 import { nodeCount, vertices, simplifiedSvg } from './simplify-svg.js';
 import { pathData } from './geometry.js';
 import { createPreviewPan } from './preview-pan.js';
@@ -19,7 +20,7 @@ export function createSimplifyEditor({ state, commit, apply, download }) {
             <div id="simplify-stage" class="simplify-stage" tabindex="0" aria-label="Simplification preview. Zoom in and drag or scroll to inspect details.">
               <div id="simplify-sheet" class="simplify-sheet"><svg id="simplify-svg" role="img" aria-label="Simplified artwork preview"></svg></div>
             </div>
-            <div id="simplify-busy" class="simplify-busy" aria-hidden="true" hidden><span class="simplify-busy-label"><span class="simplify-spinner"></span>Updating preview…</span></div>
+            <div id="simplify-busy" class="simplify-busy" hidden><div class="preview-busy-card"><span class="busy-spinner" aria-hidden="true"></span><p role="status" aria-live="polite">Updating preview…</p><button id="cancel-simplify-preview" class="small-button">Cancel</button></div></div>
           </div>
           <div class="simplify-statistics" id="simplify-statistics" role="status" aria-live="polite"></div>
           <p class="control-hint">Zoom in and drag to pan; Fit recenters. Purple is the result. The dashed blue line is the original. Nodes include sampled curves.</p>
@@ -40,11 +41,24 @@ export function createSimplifyEditor({ state, commit, apply, download }) {
     </dialog>`);
   const $ = selector => document.querySelector(selector), dialog = $('#simplify-dialog');
   const keys = ['smooth', 'breakWidth', 'tolerance'];
-  let original, result, worker, timer, revision = 0, zoom = 1;
+  let original, result, zoom = 1, completedPreview;
   let options = {};
-  function setBusy(busy) {
-    $('#simplify-stage').setAttribute('aria-busy', String(busy));
-    $('#simplify-busy').hidden = !busy;
+  const busy = createBusyTask({
+    root: dialog, overlay: $('#simplify-busy'), stage: $('#simplify-stage'),
+    onCancel() {
+      restorePreview();
+      $('#simplify-status').textContent = 'Calculation cancelled. Previous preview restored.';
+    },
+    onError(message) { restorePreview(); $('#simplify-status').textContent = message; },
+  });
+  function restorePreview() {
+    options = { ...completedPreview.options }; result = completedPreview.result;
+    paintInputs(); draw(); updateResultButtons();
+  }
+  function updateResultButtons() {
+    const available = result?.contours.length && keys.some(key => options[key] > 0);
+    $('#apply-simplify').disabled = !available;
+    $('#download-simplify').disabled = !available;
   }
   const pan = createPreviewPan({
     viewport: $('#simplify-stage'), enabled: () => zoom > 1, active: () => dialog.open,
@@ -78,43 +92,19 @@ export function createSimplifyEditor({ state, commit, apply, download }) {
     $('#simplify-statistics').innerHTML = `<span>Nodes <strong>${before.toLocaleString()} → ${after.toLocaleString()}</strong><small>${Math.abs(percent)}% ${percent >= 0 ? 'fewer' : 'more'}</small></span><span>Contours <strong>${original.contours.length} → ${art.contours.length}</strong></span>`;
   }
   function requestPreview() {
-    clearTimeout(timer); worker?.terminate(); worker = null;
-    const id = ++revision;
-    result = null;
-    $('#apply-simplify').disabled = true;
-    $('#download-simplify').disabled = true;
+    result = null; updateResultButtons();
     if (!keys.some(key => options[key] > 0)) {
-      setBusy(false);
       result = structuredClone(original); draw();
+      completedPreview = { options: { ...options }, result };
       $('#simplify-status').textContent = 'Adjust a slider to preview changes.';
       return;
     }
     $('#simplify-status').textContent = 'Updating preview…';
-    setBusy(true);
-    timer = setTimeout(() => {
-      try {
-        worker = new Worker(new URL('./simplify-worker.js', import.meta.url), { type: 'module' });
-        const finishWorker = message => {
-          worker?.terminate(); worker = null;
-          setBusy(false);
-          $('#simplify-status').textContent = message;
-        };
-        worker.onerror = () => finishWorker('The simplification preview could not run. Close and reopen to try again.');
-        worker.onmessage = ({ data }) => {
-          if (data.id !== revision || !dialog.open) return;
-          finishWorker(data.error ?? '');
-          if (data.error) return;
-          result = data.artwork; draw();
-          $('#apply-simplify').disabled = !result.contours.length;
-          $('#download-simplify').disabled = !result.contours.length;
-          $('#simplify-status').textContent = result.contours.length ? 'Preview ready. Zoom in to inspect small details.' : 'These settings remove all artwork. Lower the adjustments to keep some shapes.';
-        };
-        worker.postMessage({ id, artwork: original, options: { ...options, width: state.artworkWidth } });
-      } catch {
-        setBusy(false);
-        $('#simplify-status').textContent = 'The simplification preview could not run. Close and reopen to try again.';
-      }
-    }, 130);
+    busy.run('simplify', { artwork: original, options: { ...options, width: state.artworkWidth } }, 'Updating preview…', artwork => {
+      result = artwork; draw(); updateResultButtons();
+      completedPreview = { options: { ...options }, result };
+      $('#simplify-status').textContent = result.contours.length ? 'Preview ready. Zoom in to inspect small details.' : 'These settings remove all artwork. Lower the adjustments to keep some shapes.';
+    });
   }
   for (const key of keys) {
     for (const suffix of ['', '-range']) {
@@ -142,7 +132,7 @@ export function createSimplifyEditor({ state, commit, apply, download }) {
   for (const key of ['original', 'nodes']) $(`#simplify-${key}`).addEventListener('change', draw);
   $('#simplify-reset').addEventListener('click', () => { options = { smooth: 0, breakWidth: 0, tolerance: 0 }; paintInputs(); requestPreview(); });
   for (const id of ['close-simplify', 'cancel-simplify']) $(`#${id}`).addEventListener('click', () => dialog.close());
-  dialog.addEventListener('close', () => { setBusy(false); pan.reset(); clearTimeout(timer); worker?.terminate(); worker = null; result = original = null; revision++; });
+  dialog.addEventListener('close', () => { pan.reset(); result = original = completedPreview = null; });
   // Keep editor shortcuts from acting on the underlying artwork while modal.
   dialog.addEventListener('keydown', event => { event.stopPropagation(); });
   $('#apply-simplify').addEventListener('click', () => {

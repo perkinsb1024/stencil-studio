@@ -238,6 +238,7 @@ export function createRegionEditor({ state, render, mutate, snapshot, restore, r
     const previous = gesture; gesture = null;
     if (cancelled) restore(previous.before); else record(previous.before);
     if (svg.hasPointerCapture(previous.pointerId)) svg.releasePointerCapture(previous.pointerId);
+    if (!cancelled) render();
     save();
   }
   svg.addEventListener('pointerup', e => { if (gesture?.pointerId === e.pointerId) finishGesture(); });
@@ -279,5 +280,5 @@ export function createRegionEditor({ state, render, mutate, snapshot, restore, r
       svg.querySelector(`[data-region="${id}"][data-region-vertex="${index}"]`)?.focus({ preventScroll: true });
     }
   });
-  return { update, overlay, finishGesture, cancelDrawing };
+  return { update, overlay, finishGesture, cancelDrawing, get dragging() { return Boolean(gesture); } };
 }

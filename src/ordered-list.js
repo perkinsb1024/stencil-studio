@@ -44,6 +44,8 @@ export function createOrderedList({ element, getIds, commit, announce, disabled 
   function apply(ids, id, label) {
     if (ids.join('|') === getIds().join('|')) return;
     const scroll = element.scrollTop;
+    // Background geometry temporarily disables the list during commit.
+    element.querySelector(`[data-order-id="${id}"] .drag-handle`)?.focus({ preventScroll: true });
     commit(ids);
     element.scrollTop = scroll;
     element.querySelector(`[data-order-id="${id}"] .drag-handle`)?.focus({ preventScroll: true });

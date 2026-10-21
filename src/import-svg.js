@@ -1,4 +1,4 @@
-import { measureContour } from './geometry.js';
+export { scaleArtwork } from './artwork-scale.js';
 
 const paper = globalThis.paper;
 paper.setup(new paper.Size(1, 1));
@@ -87,17 +87,6 @@ export function importSvg(source) {
   if (bounds.maxX - bounds.minX < 0.0001) throw new Error('The artwork needs a nonzero width. Rotate vertical lines or include a wider shape.');
   if (contours.some(c => !c.closed)) warnings.push('Open paths are included as channels with square ends.');
   return { contours, sourceRegions: sourceRegions.filter(r => r.contourIds.length), bounds, warnings, description };
-}
-
-export function scaleArtwork(artwork, width, padding) {
-  const { bounds } = artwork;
-  const scale = width / (bounds.maxX - bounds.minX);
-  return {
-    contours: artwork.contours.map(c => ({ ...c, ...measureContour(c.points.map(p => ({ x: (p.x - bounds.minX) * scale + padding, y: (p.y - bounds.minY) * scale + padding })), c.closed) })),
-    width: width + 2 * padding,
-    height: (bounds.maxY - bounds.minY) * scale + 2 * padding,
-    artworkHeight: (bounds.maxY - bounds.minY) * scale,
-  };
 }
 
 export function flowerSvg() {

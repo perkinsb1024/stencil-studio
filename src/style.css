@@ -76,7 +76,7 @@
 .simplify-zoom output{font-size:12px;min-width:38px;text-align:center}
 .simplify-stage{height:clamp(280px,49vh,520px);background:#f2eef6;border:1px solid #ded5e6;border-radius:6px;overflow:auto;overscroll-behavior:contain}
 .simplify-preview-frame{position:relative}
-.simplify-busy{position:absolute;inset:0;z-index:1;display:flex;align-items:center;justify-content:center;border-radius:6px;background:#fffef9b8;pointer-events:none}
+.simplify-busy{position:absolute;inset:0;z-index:1;display:flex;align-items:center;justify-content:center;border-radius:6px;background:#fffef9b8;pointer-events:auto}
 .simplify-busy[hidden]{display:none}
 .simplify-busy-label{display:flex;align-items:center;gap:10px;padding:13px 18px;border:1px solid #ded5e6;border-radius:8px;background:#fff;box-shadow:0 3px 16px #32293915;color:#502c6c;font-size:13px;font-weight:500}
 .simplify-spinner{width:20px;height:20px;flex-shrink:0;border:2px solid #e5dcec;border-top-color:#502c6c;border-radius:50%;animation:simplify-spin .8s linear infinite}

@@ -166,3 +166,12 @@ dialog{border:1px solid #d8cee1;border-radius:12px;max-width:560px;width:calc(10
 .layer-visibility-grid .outline-actions{display:contents}
 .layer-visibility-grid .small-button{width:100%;min-width:0;height:100%;white-space:normal;text-align:center}
 .layer-visibility-controls .control-hint{margin-bottom:0}
+.preview-busy{position:absolute;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;background:#fffef9c9;cursor:wait}
+.preview-busy[hidden]{display:none}
+.preview-busy-card{display:flex;flex-direction:column;align-items:center;gap:14px;max-width:calc(100% - 32px);padding:24px;border:1px solid #ded5e6;border-radius:12px;background:#fff;box-shadow:0 4px 24px #32293920;color:#502c6c;text-align:center}
+.preview-busy-card p{margin:0;font-size:14px;font-weight:500}
+.preview-busy-card button{min-width:100px;cursor:pointer}
+.busy-spinner{width:30px;height:30px;border:3px solid #e5dcec;border-top-color:#502c6c;border-radius:50%;animation:busy-spin .8s linear infinite}
+.is-busy :is(a,summary,[role="button"]){pointer-events:none}
+@keyframes busy-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.busy-spinner{animation:none}}

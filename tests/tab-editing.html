@@ -2,6 +2,7 @@
 <style>body{font:14px system-ui;padding:24px;color:#502c6c}li{margin:8px 0}.fail{color:#a00}iframe{width:1100px;height:1500px;border:1px solid #ddd}#summary{font-weight:bold}</style>
 <h1>Tab editing checks</h1><p id="summary">Running…</p><ol id="results"></ol><iframe title="Editor under test" src="about:blank"></iframe>
 <script type="module">
+import { previewReady } from './preview-ready.js';
 const frame = document.querySelector('iframe');
 localStorage.removeItem('stencil-studio.workspace.v1:tab-editing-tests');
 await new Promise(resolve => { frame.addEventListener('load', resolve, { once: true }); frame.src = '/?workspace=tab-editing-tests&live-reload=off'; });
@@ -12,7 +13,8 @@ if (new URLSearchParams(location.search).has('headless')) {
   w.cancelAnimationFrame = id => w.clearTimeout(id);
 }
 const $ = selector => d.querySelector(selector);
-const settle = () => new Promise(resolve => w.requestAnimationFrame(() => w.requestAnimationFrame(resolve)));
+const settle = async () => { await new Promise(resolve => setTimeout(resolve, 40)); await previewReady(d); };
+await settle();
 function assert(value, message = 'Unexpected result') { if (!value) throw new Error(message); }
 async function check(name, action) {
   const li = document.createElement('li');
@@ -351,16 +353,16 @@ await check('Delete removes selected tabs after focus leaves the SVG and preserv
   $('#selected-tab-width').dispatchEvent(typing);
   assert(!typing.defaultPrevented && markers().length === before, 'Delete was intercepted while typing');
   d.body.focus();
-  d.body.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }));
+  d.body.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true })); await settle();
   assert(markers().length === before - 1, 'Selected tab was not removed without marker focus');
   await click('#undo'); assert(markers().length === before);
   await change('#tab-picker', markers()[0].dataset.tab);
   $('#tab-picker').focus();
-  $('#tab-picker').dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true }));
+  $('#tab-picker').dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true })); await settle();
   assert(markers().length === before - 1, 'Picker focus prevented deleting the selected tab');
   await click('#undo'); assert(markers().length === before);
   selectAllTabs();
-  d.body.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }));
+  d.body.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true })); await settle();
   assert(markers().length === 0, 'Delete did not remove the selected group');
   await click('#undo'); assert(markers().length === before);
 });

@@ -2,6 +2,7 @@
 <style>body{font:15px system-ui;padding:24px;color:#502c6c}li{margin:10px 0}.fail{color:#b22}iframe{width:1200px;height:1200px;border:1px solid #ddd}</style>
 <h1>Intelligent area checks</h1><p id="summary">Running…</p><ol id="results"></ol><iframe id="editor" title="Stencil editor"></iframe>
 <script src="/vendor/paper-full.min.js"></script><script src="/vendor/clipper.js"></script><script type="module">
+import { previewReady } from './preview-ready.js';
 import { importSvg } from '/src/import-svg.js';
 import { suggestAreas } from '/src/area-suggestions.js';
 const wrap = body => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">${body}</svg>`;
@@ -10,7 +11,7 @@ localStorage.removeItem(key);
 let w, d;
 const $ = selector => d.querySelector(selector);
 const assert = (value, message = 'Unexpected result') => { if (!value) throw new Error(message); };
-const tick = () => new Promise(resolve => setTimeout(resolve, 50));
+const tick = async () => { await new Promise(resolve => setTimeout(resolve, 50)); await previewReady(d); };
 const click = async selector => { $(selector).click(); await tick(); };
 const change = async (selector, value) => { $(selector).value = value; $(selector).dispatchEvent(new w.Event('change', { bubbles: true })); await tick(); };
 function flush() { w.dispatchEvent(new w.Event('stencil:before-reload')); return JSON.parse(localStorage.getItem(key)); }

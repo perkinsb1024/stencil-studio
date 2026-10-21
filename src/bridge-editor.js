@@ -1,4 +1,4 @@
-import { snapRegionBridge, generateRegionBridges, scaleBridges, unscaleBridge, pointInMaterial, bridgeKey } from './material-geometry.js';
+import { scaleBridges, unscaleBridge, pointInMaterial, bridgeKey } from './material-geometry.js';
 import { pathData } from './geometry.js';
 
 export const bridgePanel = `
@@ -14,7 +14,7 @@ export const bridgePanel = `
   <details class="panel-details"><summary>Advanced</summary><div class="bridge-fields"><label>Minimum Material Width (mm)<input id="minimum-material-width" type="number" min="0.1" max="15" step="0.1" value="0.5" /></label><label class="check-label"><input id="bridge-reinforcement" type="checkbox" /><span>Add Reinforcement</span></label></div><button id="clear-bridge-exclusions" class="small-button" disabled>Allow Removed Connections</button><p class="control-hint">Allow previously removed automatic connections to be generated again.</p></details>
 </section>`;
 
-export function createBridgeEditor({ state, render, mutate, snapshot, restore, record, commit, save, notify, svgPoint, screenUnit }) {
+export function createBridgeEditor({ state, render, mutate, snapshot, restore, record, commit, save, notify, svgPoint, screenUnit, runTask }) {
   const $ = selector => document.querySelector(selector), svg = $('#preview-svg');
   let gesture = null, adding = false, start = null;
   const selected = () => state.regionBridges.find(b => b.id === state.selectedRegionBridge);
@@ -49,6 +49,7 @@ export function createBridgeEditor({ state, render, mutate, snapshot, restore, r
     } else if (cancelled) restore(finished.before);
     else record(finished.before);
     if (svg.hasPointerCapture(finished.pointerId)) svg.releasePointerCapture(finished.pointerId);
+    if (!cancelled && finished.kind !== 'box') render();
     save();
   }
   function cancel() { finishGesture(true); adding = false; start = null; }
@@ -94,7 +95,9 @@ export function createBridgeEditor({ state, render, mutate, snapshot, restore, r
   function overlay() {
     const unit = screenUnit();
     const unsupported = state.editingBridges || state.workflowStep === 3 ? (state.result.unsupported ?? []).map(component => `<path class="unsupported-material" d="${component.paths.map(p => pathData(p)).join('')}" fill-rule="nonzero" pointer-events="none"/>`).join('') : '';
-    const markers = (state.editingBridges || state.showBridges ? state.result.regionBridges ?? [] : []).map((b, i) => {
+    const current = new Map(scaled().map(bridge => [bridge.id, bridge]));
+    const markers = (state.editingBridges || state.showBridges ? state.result.regionBridges ?? [] : []).map((bridge, i) => {
+      const b = { ...bridge, ...current.get(bridge.id) };
       const active = state.editingBridges && state.selectedRegionBridges.includes(b.id);
       const color = !b.valid ? '#c24545' : b.automatic ? '#c3963e' : '#258477';
       return `<g class="region-bridge ${active ? 'selected' : ''}" style="--bridge-color:${color}"><path class="bridge-highlight" d="${pathData(b.polygon)}" pointer-events="none"/>${state.editingBridges ? `<path data-material-bridge="${b.id}" d="M${b.a.x} ${b.a.y}${b.control ? `Q${b.control.x} ${b.control.y} ${b.b.x} ${b.b.y}` : `L${b.b.x} ${b.b.y}`}" class="bridge-hit" vector-effect="non-scaling-stroke" tabindex="0" role="button" aria-label="Bridge ${i + 1}, ${b.valid ? 'valid anchors' : 'invalid anchors'}" aria-pressed="${active}"/>${active ? `${b.control ? `<path d="M${b.a.x} ${b.a.y}L${b.control.x} ${b.control.y}L${b.b.x} ${b.b.y}" class="bridge-control-guide" vector-effect="non-scaling-stroke" pointer-events="none"/>` : ''}${['a', 'b', ...(b.control ? ['control'] : [])].map(end => `<circle data-material-bridge="${b.id}" data-bridge-end="${end}" cx="${b[end].x}" cy="${b[end].y}" r="${unit * 6}" vector-effect="non-scaling-stroke" tabindex="0" role="button" aria-label="Bridge ${i + 1} ${end === 'control' ? 'bend handle' : `endpoint ${end}`}; drag or use arrow keys"/>`).join('')}` : ''}` : ''}</g>`;
@@ -104,11 +107,13 @@ export function createBridgeEditor({ state, render, mutate, snapshot, restore, r
   }
   $('#generate-bridges').addEventListener('click', () => {
     finishGesture(); adding = false; start = null;
-    const bridges = generateRegionBridges(state.scaled.contours, state.result.channelCuts, options()).map(b => {
-      const { distance, polygon, valid, ...saved } = unscaleBridge(b, state.artworkWidth, state.scaled.padding);
-      return saved;
+    runTask('bridges', { contours: state.scaled.contours, channelCuts: state.result.channelCuts, settings: options() }, 'Generating bridges…', generated => {
+      const bridges = generated.map(b => {
+        const { distance, polygon, valid, ...saved } = unscaleBridge(b, state.artworkWidth, state.scaled.padding);
+        return saved;
+      });
+      mutate(() => { state.regionBridges = bridges; select([]); });
     });
-    mutate(() => { state.regionBridges = bridges; select([]); });
   });
   $('#add-bridge').addEventListener('click', () => { finishGesture(); adding = !adding; start = null; render(); });
   $('#bridge-picker').addEventListener('change', e => { commit(); selectBridge(e.target.value || null); render(); });
@@ -117,11 +122,12 @@ export function createBridgeEditor({ state, render, mutate, snapshot, restore, r
     const bridges = selection();
     if (bridges.length !== 1 || bridges[0].automatic) return;
     const bridge = scaled().find(b => b.id === bridges[0].id);
-    const snapped = snapRegionBridge(state.scaled.contours, state.result.channelCuts, options(), bridge);
-    if (!snapped) return notify('No nearby shape continuation fits this bridge. Move its anchors closer to the feature and try again.');
-    const saved = unscaleBridge(snapped, state.artworkWidth, state.scaled.padding);
-    mutate(() => { state.regionBridges = state.regionBridges.map(b => b.id === saved.id ? saved : b); });
-    notify('Bridge snapped to the existing shape and matched its width.');
+    runTask('snap', { contours: state.scaled.contours, channelCuts: state.result.channelCuts, settings: options(), bridge }, 'Snapping bridge to artwork…', snapped => {
+      if (!snapped) return notify('No nearby shape continuation fits this bridge. Move its anchors closer to the feature and try again.');
+      const saved = unscaleBridge(snapped, state.artworkWidth, state.scaled.padding);
+      mutate(() => { state.regionBridges = state.regionBridges.map(b => b.id === saved.id ? saved : b); });
+      notify('Bridge snapped to the existing shape and matched its width.');
+    });
   });
   $('#remove-bridge').addEventListener('click', remove);
   $('#clear-bridge-exclusions').addEventListener('click', () => mutate(() => { state.bridgeExclusions = []; }));
@@ -223,5 +229,5 @@ export function createBridgeEditor({ state, render, mutate, snapshot, restore, r
       svg.querySelector(`[data-material-bridge="${state.selectedRegionBridge}"][data-bridge-end="${end}"]`)?.focus();
     }
   });
-  return { update, overlay, finishGesture, cancel };
+  return { update, overlay, finishGesture, cancel, get dragging() { return Boolean(gesture); } };
 }

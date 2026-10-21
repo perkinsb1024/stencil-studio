@@ -1,0 +1,102 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Busy generation checks</title>
+<style>body{font:14px system-ui;margin:24px;color:#502c6c}li{margin:10px 0}.fail{color:#b22}iframe{width:1200px;height:900px;border:1px solid #ddd}</style>
+<h1>Busy generation checks</h1><p id="summary">Running…</p><ol id="results"></ol><iframe title="Stencil editor"></iframe>
+<script type="module">
+import { previewReady } from './preview-ready.js';
+const frame = document.querySelector('iframe'), key = 'stencil-studio.workspace.v1:busy-generation';
+localStorage.removeItem(key);
+await new Promise(resolve => { frame.onload = resolve; frame.src = '/?workspace=busy-generation&live-reload=off'; });
+const w = frame.contentWindow, d = w.document, $ = selector => d.querySelector(selector);
+w.requestAnimationFrame = cb => w.setTimeout(() => cb(w.performance.now()), 16);
+w.cancelAnimationFrame = id => w.clearTimeout(id);
+const assert = (value, message = 'Unexpected result') => { if (!value) throw new Error(message); };
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+const ready = async () => { await pause(30); await previewReady(d); };
+const click = async selector => { $(selector).click(); await ready(); };
+const change = (selector, value) => {
+  const raf = w.requestAnimationFrame; w.requestAnimationFrame = callback => { callback(w.performance.now()); return 0; };
+  $(selector).value = value; $(selector).dispatchEvent(new w.Event('change', { bubbles: true }));
+  w.requestAnimationFrame = raf;
+};
+const cuts = () => $('.cut-shape').getAttribute('d');
+function saved() { w.dispatchEvent(new w.Event('stencil:before-reload')); return JSON.parse(localStorage.getItem(key)); }
+let passes = 0, failures = 0;
+async function check(name, action) {
+  const li = document.createElement('li');
+  try { await action(); li.textContent = `PASS — ${name}`; passes++; }
+  catch (error) { li.className = 'fail'; li.textContent = `FAIL — ${name}: ${error.message}`; failures++; }
+  document.querySelector('#results').append(li);
+}
+function locked(cancelId, overlayId) {
+  assert(!$(overlayId).hidden, 'Preview overlay is missing');
+  assert(!$(cancelId).disabled && $(cancelId).getBoundingClientRect().height > 0, 'Cancel must remain usable');
+  assert([...d.querySelectorAll('button,input,select,textarea')].every(el => el.id === cancelId.slice(1) || el.disabled), 'A control remains enabled');
+  assert(d.activeElement === $(cancelId), 'Cancel should receive keyboard focus');
+}
+await ready();
+await click('#edit-tabs');
+await check('Tab generation locks every control and Cancel restores geometry, settings, and history', async () => {
+  const before = saved(), path = cuts();
+  change('#tabCount', 8);
+  locked('#cancel-generation', '#preview-busy');
+  $('#cancel-generation').click(); await ready();
+  assert(cuts() === path && $('#tabCount').value === '4');
+  assert(JSON.stringify(saved().history) === JSON.stringify(before.history), 'Cancelled tabs entered undo history');
+  assert(!$('#upload').disabled && $('#remove-bridge').disabled, 'Control disabled states were not restored');
+  await pause(150); assert(cuts() === path, 'A stale result replaced the restored preview');
+});
+await check('Completed tab generation updates geometry and undo restores the previous result', async () => {
+  const path = cuts(); change('#tabCount', 6); await ready();
+  assert(cuts() !== path && $('#preview-busy').hidden);
+  await click('#undo'); assert(cuts() === path && $('#tabCount').value === '4');
+});
+await check('Worker startup errors restore the previous stencil and unlock controls', async () => {
+  const Worker = w.Worker, path = cuts();
+  w.Worker = class { constructor() { throw new Error('Simulated worker failure'); } };
+  change('#tabCount', 7); await pause(30); w.Worker = Worker; await ready();
+  assert($('#notice').textContent.includes('Simulated worker failure'));
+  assert(cuts() === path && $('#tabCount').value === '4' && !$('#upload').disabled);
+});
+await check('Layer detection and material analysis can be cancelled with Escape', async () => {
+  await click('#edit-outlines'); const path = cuts();
+  $('#apply-area-suggestions').click(); locked('#cancel-generation', '#preview-busy');
+  d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await ready();
+  assert(cuts() === path && $('#preview-busy').hidden);
+  $('[data-step="3"]').click(); locked('#cancel-generation', '#preview-busy');
+  $('#cancel-generation').click(); await ready();
+  assert($('.workspace').dataset.workflowStep === '2');
+});
+await check('PhD.svg imports with background layer detection and bridge generation remains responsive', async () => {
+  const source = await (await fetch('/svgs/PhD.svg')).text();
+  const files = new w.DataTransfer(); files.items.add(new w.File([source], 'PhD.svg', { type: 'image/svg+xml' }));
+  $('#file-input').files = files.files; $('#file-input').dispatchEvent(new w.Event('change', { bubbles: true }));
+  await ready(); assert($('#filename').textContent === 'PhD.svg' && cuts().length > 100);
+  await click('#edit-bridges'); const before = saved(), path = cuts();
+  $('#generate-bridges').click(); locked('#cancel-generation', '#preview-busy');
+  // A real timer firing during this calculation demonstrates that the UI thread is free.
+  await pause(50); locked('#cancel-generation', '#preview-busy');
+  $('#cancel-generation').click(); await ready();
+  assert(cuts() === path && JSON.stringify(saved().document.regionBridges) === JSON.stringify(before.document.regionBridges));
+  assert(JSON.stringify(saved().history) === JSON.stringify(before.history));
+});
+await check('PhD.svg bridge generation completes and a cancelled regeneration preserves the finished bridges', async () => {
+  $('#generate-bridges').click(); await ready();
+  const before = saved(), path = cuts();
+  assert(before.document.regionBridges.length > 0, 'No bridges were generated');
+  $('#generate-bridges').click(); locked('#cancel-generation', '#preview-busy');
+  $('#cancel-generation').click(); await ready();
+  assert(cuts() === path && JSON.stringify(saved().document) === JSON.stringify(before.document));
+  assert(JSON.stringify(saved().history) === JSON.stringify(before.history));
+});
+await check('Simplification disables controls and cancellation retains its last completed preview', async () => {
+  await click('#simplify-artwork'); const path = $('#simplify-svg').innerHTML;
+  change('#simplify-smooth', 0.5); locked('#cancel-simplify-preview', '#simplify-busy');
+  $('#cancel-simplify-preview').click(); await ready();
+  assert($('#simplify-dialog').open && $('#simplify-smooth').value === '0');
+  assert($('#simplify-svg').innerHTML === path && $('#apply-simplify').disabled);
+  change('#simplify-tolerance', 0.12); await ready();
+  assert(!$('#apply-simplify').disabled && $('#simplify-busy').hidden);
+  await click('#cancel-simplify');
+});
+document.querySelector('#summary').textContent = `${passes} passed, ${failures} failed`;
+</script>
