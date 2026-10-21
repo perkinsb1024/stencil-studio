@@ -218,3 +218,32 @@ test('units and grid preferences round trip and reject invalid values', () => {
     assert.equal(readWorkspace(store), null);
   }
 });
+
+test('measurement annotations and snapping round trip while invalid coordinates are rejected', () => {
+  const store = storage();
+  const saved = structuredClone(workspace);
+  saved.ui.measurements = [{ a: { x: 10, y: 20 }, b: { x: 30, y: 40 } }];
+  saved.ui.measureSnap = 'diagonal';
+  writeWorkspace(store, saved);
+  assert.deepEqual(readWorkspace(store), saved);
+  saved.ui.measurements[0].a.x = -1;
+  writeWorkspace(store, saved);
+  assert.equal(readWorkspace(store), null);
+});
+
+test('independent measurement snap checkboxes persist and reject invalid flags', () => {
+  const store = storage(), saved = structuredClone(workspace);
+  saved.ui.measureSnap = { axes: true, diagonal: false, objects: true };
+  writeWorkspace(store, saved); assert.deepEqual(readWorkspace(store), saved);
+  saved.ui.measureSnap.objects = 'true'; writeWorkspace(store, saved);
+  assert.equal(readWorkspace(store), null);
+});
+
+test('rulers validate and round trip in document snapshots and mixed undo history', () => {
+  const store=storage(),saved=structuredClone(workspace);
+  saved.document.measurements=[{a:{x:10,y:20},b:{x:30,y:40}}];
+  saved.history.past.push({...structuredClone(document),measurements:[]});
+  writeWorkspace(store,saved);assert.deepEqual(readWorkspace(store),saved);
+  saved.history.past.at(-1).measurements=[{a:{x:-1,y:0},b:{x:2,y:3}}];
+  writeWorkspace(store,saved);assert.equal(readWorkspace(store),null);
+});

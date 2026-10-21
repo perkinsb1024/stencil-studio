@@ -12,6 +12,8 @@ const validPoint = p => isObject(p) && ['x', 'y'].every(key => Number.isFinite(p
 const validSuggestions = value => value === undefined || value === null || isObject(value) && value.version === 1 && Number.isFinite(value.artworkWidth) && value.artworkWidth >= 10 && value.artworkWidth <= 1000 &&
   isObject(value.byRegion) && Object.keys(value.byRegion).length <= 500 && Object.entries(value.byRegion).every(([id, s]) => isShape(id) && isObject(s) && ['outline', 'keep', 'cut', 'hidden'].includes(s.mode) && ['low', 'medium', 'high'].includes(s.confidence) && typeof s.reason === 'string' && s.reason.length <= 1000 && ['area', 'perimeter'].every(key => Number.isFinite(s[key]) && s[key] >= 0) && (s.visibleArea === undefined || Number.isFinite(s.visibleArea) && s.visibleArea >= 0) && Array.isArray(s.overlaps) && s.overlaps.length <= 500 && s.overlaps.every(isShape)) &&
   Array.isArray(value.warnings) && value.warnings.length <= 1000 && value.warnings.every(w => typeof w === 'string' && w.length <= 2000);
+const validMeasurements = value => Array.isArray(value) && value.length <= 1000 && value.every(r =>
+  isObject(r) && [r.a, r.b].every(p => isObject(p) && Number.isFinite(p.x) && Number.isFinite(p.y) && p.x >= 0 && p.y >= 0 && p.x <= 10000 && p.y <= 10000));
 const validMaterial = value =>
   validSuggestions(value.areaSuggestions) &&
   (value.areaDecisions === undefined || isObject(value.areaDecisions) && Object.keys(value.areaDecisions).length <= 500 && Object.entries(value.areaDecisions).every(([id, decision]) => isShape(id) && ['manual', 'accepted', 'kept'].includes(decision) && value.areaOverrides?.[id] === true)) &&
@@ -28,7 +30,7 @@ const validRegions = value => Array.isArray(value) && value.length <= 100 && new
   isObject(r) && isRegion(r.id) && (r.label === undefined || typeof r.label === 'string' && /^Region \d{1,6}$/.test(r.label)) && (r.contourId === null || isContour(r.contourId)) && Number.isFinite(r.width) && r.width >= 0.2 && r.width <= 12 && (r.taperLength === undefined || Number.isFinite(r.taperLength) && r.taperLength >= 0.1 && r.taperLength <= 50) && ['roundedTabs', 'roundedChannelCorners'].every(key => r[key] === undefined || typeof r[key] === 'boolean') && validPolygon(r.points));
 const ranges = { artworkWidth: [10, 1000], channelWidth: [0.2, 12], tabWidth: [0.5, 15], tabCount: [1, 24], tabOffset: [0, 100], margin: [0, 100] };
 function validSnapshot(value) {
-  return isObject(value) && validMaterial(value) && (value.source === undefined || typeof value.source === 'string' && value.source.length <= 3_000_000 && typeof value.name === 'string' && (value.example === undefined || typeof value.example === 'string')) && (value.regions === undefined || validRegions(value.regions)) && ['hiddenContours', 'cutawayContours'].every(key => value[key] === undefined || isContourList(value[key])) && isObject(value.settings) && Object.entries(ranges).every(([key, [min, max]]) =>
+  return isObject(value) && validMaterial(value) && (value.measurements === undefined || validMeasurements(value.measurements)) && (value.source === undefined || typeof value.source === 'string' && value.source.length <= 3_000_000 && typeof value.name === 'string' && (value.example === undefined || typeof value.example === 'string')) && (value.regions === undefined || validRegions(value.regions)) && ['hiddenContours', 'cutawayContours'].every(key => value[key] === undefined || isContourList(value[key])) && isObject(value.settings) && Object.entries(ranges).every(([key, [min, max]]) =>
     Number.isFinite(value.settings[key]) && value.settings[key] >= min && value.settings[key] <= max) &&
     (value.settings.roundedTabs === undefined || typeof value.settings.roundedTabs === 'boolean') &&
     (value.settings.roundedChannelCorners === undefined || typeof value.settings.roundedChannelCorners === 'boolean') &&
@@ -42,6 +44,9 @@ export function readWorkspace(storage, key = workspaceKey) {
     if (!isObject(saved) || saved.version !== 1 || typeof saved.source !== 'string' || saved.source.length > 3_000_000 ||
       typeof saved.name !== 'string' || !validSnapshot(saved.document) || !isObject(saved.ui)) return null;
     const ui = saved.ui;
+    if (ui.measurements !== undefined && !validMeasurements(ui.measurements)) return null;
+    if (ui.measureSnap !== undefined && !['free', 'auto', 'horizontal', 'vertical', 'diagonal'].includes(ui.measureSnap) &&
+      !(isObject(ui.measureSnap) && ['axes', 'diagonal', 'objects'].every(key => typeof ui.measureSnap[key] === 'boolean'))) return null;
     if (ui.units !== undefined && !['mm', 'in'].includes(ui.units) ||
       ui.showGrid !== undefined && typeof ui.showGrid !== 'boolean' ||
       ui.gridSpacing !== undefined && (!Number.isFinite(ui.gridSpacing) || ui.gridSpacing < 3.175 || ui.gridSpacing > 101.6)) return null;

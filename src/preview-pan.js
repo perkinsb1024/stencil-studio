@@ -70,5 +70,11 @@ export function createPreviewPan({ viewport, enabled, active = () => true, defau
   function reset() { stop(null); space = spaceUsed = false; mode = false; suppressClickUntil = 0; refresh(); }
   window.addEventListener('blur', () => { stop(null); space = spaceUsed = false; refresh(); });
   button?.addEventListener('click', () => { mode = !mode; refresh(); });
-  return { refresh, reset };
+  // Tools registered before Pan must yield while navigation owns the pointer.
+  function handlesPointer(event) {
+    if (gesture) return true;
+    if (event.type === 'click' || event.type === 'auxclick') return !!event.detail && (ready() || performance.now() < suppressClickUntil);
+    return ready() || event.type === 'pointerdown' && event.button === 1 && available();
+  }
+  return { refresh, reset, handlesPointer, get panning() { return !!gesture; } };
 }

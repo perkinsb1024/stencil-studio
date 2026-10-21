@@ -102,16 +102,20 @@ await check('Ordinary tab dragging continues to edit the tab without panning',as
  assert(JSON.stringify(position())===JSON.stringify(before));
  assert(Object.keys(saved().document.tabLayouts).length>0,'Tab drag did not customize an outline');
 });
-await check('Space activates focused controls normally and cancels their activation when used to pan',async()=>{
+await check('Space toggles Pan with a focused button and holding Space preserves its state',async()=>{
  const button=$('#zoom-in');
  const key=type=>new w.KeyboardEvent(type,{bubbles:true,cancelable:true,key:' ',code:'Space'});
  let down=key('keydown'),up=key('keyup');
  button.dispatchEvent(down);button.dispatchEvent(up);
- assert(!down.defaultPrevented&&!up.defaultPrevented,'Normal Space button activation was suppressed');
+ assert(down.defaultPrevented&&up.defaultPrevented,'Space could activate the focused button');
+ assert($('#pan-preview').getAttribute('aria-pressed')==='true','Space did not toggle Pan on');
+ button.dispatchEvent(key('keydown'));button.dispatchEvent(key('keyup'));
+ assert($('#pan-preview').getAttribute('aria-pressed')==='false','Space did not toggle Pan off');
  down=key('keydown');button.dispatchEvent(down);
  const start=position();drag($('#preview-svg'),-10,-10);
  up=key('keyup');button.dispatchEvent(up);
  assert(up.defaultPrevented&&position().x===start.x-10&&position().y===start.y-10);
+ assert($('#pan-preview').getAttribute('aria-pressed')==='false','Holding Space toggled Pan');
 });
 await check('Space-drag does not create region vertices while drawing',async()=>{
  await click('#edit-regions');await click('#draw-region');

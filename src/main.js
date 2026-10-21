@@ -13,6 +13,8 @@ import { customizeContour, nearestOnContour, resolveTabs } from './tab-layout.js
 import { workspaceKey, readWorkspace, writeWorkspace } from './workspace-storage.js';
 import { createSimplifyEditor } from './simplify-editor.js';
 import { createPreviewPan } from './preview-pan.js';
+import { createMeasureTool } from './measure-tool.js';
+import { createPreviewDimensions } from './preview-dimensions.js';
 import { createBridgeEditor, bridgePanel } from './bridge-editor.js';
 import { materialMode, scaleBridges } from './material-geometry.js';
 import { suggestionDefaults, treatmentLabel } from './area-suggestions.js';
@@ -170,8 +172,6 @@ function render() {
   svg.classList.toggle('editing-tabs', state.editing);
   svg.classList.toggle('editing-outlines', state.editingOutlines);
   svg.classList.toggle('adding-tab', state.adding);
-  $('#dimension-width').textContent = formatLength(width, state);
-  $('#dimension-height').textContent = formatLength(height, state);
   const support = $('#material-status');
   support.hidden = true;
   $('#offset-value').textContent = `${state.tabOffset}%`;
@@ -482,6 +482,7 @@ function fitSheet(center = null) {
   state.panX = Math.max(-maxX, Math.min(maxX, state.panX));
   state.panY = Math.max(-maxY, Math.min(maxY, state.panY));
   wrap.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.zoom})`;
+  previewDimensions.refresh();
   resizePreviewHandles();
   $('#zoom-label').textContent = `${Math.round(state.zoom * 100)}%`;
   previewPan.refresh();
@@ -869,11 +870,23 @@ function showGhost(event) {
 let drag = null, suppressOutlineClick = false;
 const preview = $('#preview-svg');
 const selectionViewport = $('#canvas-viewport');
+const measureTool = createMeasureTool({
+  viewport: selectionViewport, svg: preview, overlay: $('#measure-overlay'), state,
+  format: value => formatLength(value, state), save: queueWorkspaceSave, modeChanged: () => previewPan.refresh(),
+  panOwns: event => previewPan.handlesPointer(event), panning: () => previewPan.panning,
+  edit: action => { commitSettings(); const before = snapshot(); action(); history.record(before); },
+  begin: () => { commitWorkspaceEdits(); clearGhost(); previewPan.reset(); },
+});
+const previewDimensions = createPreviewDimensions({
+  viewport: selectionViewport, sheet: $('#sheet-wrap'),
+  width: $('#dimension-width'), height: $('#dimension-height'),
+  getSize: () => state.scaled, format: value => formatLength(value, state), changed: () => measureTool.draw(),
+});
 const previewPan = createPreviewPan({
   viewport: $('#canvas-viewport'), button: $('#pan-preview'),
   enabled: () => state.zoom >= 1,
   active: () => !document.querySelector('dialog[open]'),
-  defaultDrag: () => !state.editing && !state.editingOutlines && !state.editingRegions && !state.editingBridges,
+  defaultDrag: () => !measureTool.active && !state.editing && !state.editingOutlines && !state.editingRegions && !state.editingBridges,
   getPosition: () => ({ x: state.panX, y: state.panY }),
   setPosition: ({ x, y }) => { state.panX = x; state.panY = y; fitSheet(); },
   changed: queueWorkspaceSave,
@@ -1091,6 +1104,7 @@ document.addEventListener('keydown', e => {
 function loadSource(source, name, example = '') {
   try {
     const artwork = importSvg(source);
+    measureTool.reset();
     state.sourceChosen = Boolean(state.source);
     state.workflowStep = 1; state.activeTool = 'layers';
     bridgeEditor.cancel(); Object.assign(state, materialDefaults()); state.selectedRegionBridge = null; state.selectedRegionBridges = [];
@@ -1144,7 +1158,7 @@ function createHistory() {
   };
 }
 function snapshot() {
-  return structuredClone({ source: state.source, name: state.name, example: state.example, settings: Object.fromEntries(Object.keys(defaults).map(key => [key, state[key]])), tabLayouts: state.tabLayouts, hiddenContours: state.hiddenContours, cutawayContours: state.cutawayContours, regions: state.regions, ...Object.fromEntries(Object.keys(materialDefaults()).map(key => [key, state[key]])) });
+  return structuredClone({ measurements: state.measurements, source: state.source, name: state.name, example: state.example, settings: Object.fromEntries(Object.keys(defaults).map(key => [key, state[key]])), tabLayouts: state.tabLayouts, hiddenContours: state.hiddenContours, cutawayContours: state.cutawayContours, regions: state.regions, ...Object.fromEntries(Object.keys(materialDefaults()).map(key => [key, state[key]])) });
 }
 function syncSourceInputs() {
   $('#filename').textContent = state.name;
@@ -1152,6 +1166,8 @@ function syncSourceInputs() {
 }
 function restore(saved) {
   cancelAnimationFrame(renderFrame); pendingSettings = null; positionGesture = null;
+  measureTool.cancelDraft();
+  state.measurements = structuredClone(saved.measurements ?? []);
   if (saved.source && saved.source !== state.source) {
     state.artwork = importSvg(saved.source); state.source = saved.source;
     state.sourceWarnings = state.artwork.warnings; state.name = saved.name; state.example = saved.example ?? '';
@@ -1281,6 +1297,17 @@ for (const mode of ['material', 'cut']) $(`#${mode}-view`).addEventListener('cli
   for (const v of ['material', 'cut']) { $(`#${v}-view`).classList.toggle('active', v === mode); $(`#${v}-view`).setAttribute('aria-pressed', v === mode); }
   render();
 });
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && !e.altKey && ['+', '=', '-'].includes(e.key) && !document.querySelector('dialog[open]')) {
+    e.preventDefault(); e.stopImmediatePropagation(); zoomPreview(e.key === '-' ? -0.25 : 0.25);
+  }
+}, true);
+// Pointer clicks should not leave focus behind for Escape/Space to highlight.
+// Keyboard activation retains focus and the visible keyboard navigation ring.
+$('.zoom-controls').addEventListener('click', event => {
+  const button = event.target.closest('button');
+  if (event.detail > 0 && button === document.activeElement) button.blur();
+});
 $('#zoom-in').addEventListener('click', () => zoomPreview(0.25));
 $('#zoom-out').addEventListener('click', () => zoomPreview(-0.25));
 $('#zoom-fit').addEventListener('click', () => { state.zoom = 1; state.panX = state.panY = 0; previewPan.reset(); fitSheet(); });
@@ -1301,7 +1328,7 @@ $('#export-session').addEventListener('click', () => {
   commitWorkspaceEdits();
   const session = { format: 'stencil-studio-session', exportedAt: new Date().toISOString(), ...captureWorkspace() };
   downloadFile(JSON.stringify(session, null, 2) + '\n', 'application/json', state.name.replace(/\.svg$/i, '') + '-session.json');
-  notify('Session exported with the original SVG, settings, edits, and undo history.');
+  notify('Session exported with the original SVG, settings, edits, rulers, and undo history.');
 });
 $('#help').addEventListener('click', () => $('#help-dialog').showModal());
 for (const id of ['close-help', 'got-it']) $(`#${id}`).addEventListener('click', () => $('#help-dialog').close());
@@ -1324,7 +1351,7 @@ function queueWorkspaceSave() {
   workspaceSaveTimer = setTimeout(saveWorkspace, 150);
 }
 function captureWorkspace() {
-  const ui = Object.fromEntries(['units', 'showGrid', 'gridSpacing', 'view', 'showTabs', 'showOriginal', 'zoom', 'panX', 'panY', 'editing', 'adding', 'selectedContour', 'selectedTab', 'selectedTabs', 'selectCurrentOutlineOnly', 'editingOutlines', 'selectedOutlines', 'showHiddenOutlines', 'editingRegions', 'selectedRegion', 'drawingRegion', 'regionDraft', 'regionWidth', 'regionTaperLength', 'regionRoundedTabs', 'regionRoundedChannelCorners', 'regionScope'].map(key => [key, state[key]]));
+  const ui = Object.fromEntries(['measureSnap', 'units', 'showGrid', 'gridSpacing', 'view', 'showTabs', 'showOriginal', 'zoom', 'panX', 'panY', 'editing', 'adding', 'selectedContour', 'selectedTab', 'selectedTabs', 'selectCurrentOutlineOnly', 'editingOutlines', 'selectedOutlines', 'showHiddenOutlines', 'editingRegions', 'selectedRegion', 'drawingRegion', 'regionDraft', 'regionWidth', 'regionTaperLength', 'regionRoundedTabs', 'regionRoundedChannelCorners', 'regionScope'].map(key => [key, state[key]]));
   const viewport = $('#canvas-viewport');
   Object.assign(ui, { workflowStep: state.workflowStep, activeTool: state.activeTool, showBridges: state.showBridges, reviewingTypes: state.reviewingTypes, reviewRegion: state.reviewRegion, sourceChosen: state.sourceChosen, editingBridges: state.editingBridges, selectedRegionBridge: state.selectedRegionBridge, selectedRegionBridges: state.selectedRegionBridges });
   return {
@@ -1335,7 +1362,7 @@ function captureWorkspace() {
   };
 }
 function workspaceDocumentSignature(saved) {
-  return JSON.stringify([saved.source, saved.name, saved.example, saved.document, saved.history]);
+  return JSON.stringify([saved.source, saved.name, saved.example, saved.document, saved.history, saved.ui?.measurements]);
 }
 function saveWorkspace(force = false) {
   clearTimeout(workspaceSaveTimer);
@@ -1372,6 +1399,7 @@ function restoreWorkspace() {
     const contourIds = new Set(artwork.contours.map(c => c.id));
     const selectedContour = contourIds.has(saved.ui.selectedContour) ? saved.ui.selectedContour : artwork.contours[0].id;
     Object.assign(state, saved.document.settings, saved.ui, { artwork, source: saved.source, name: saved.name, example: saved.example, sourceWarnings: artwork.warnings, tabLayouts: saved.document.tabLayouts, selectedContour });
+    state.measurements = structuredClone(saved.document.measurements ?? saved.ui.measurements ?? []);
     state.hiddenContours = (saved.document.hiddenContours ?? []).filter(id => contourIds.has(id));
     state.regions = structuredClone(saved.document.regions ?? []).map((region, index) => ({ ...region, label: region.label ?? `Region ${index + 1}` }));
     state.cutawayContours = (saved.document.cutawayContours ?? []).filter(id => artwork.contours.some(c => c.id === id && c.closed));
@@ -1399,7 +1427,7 @@ function restoreWorkspace() {
     syncPreviewPreferences(); syncSettingInputs();
     // Older snapshots share the workspace source. Bind it now so Undo can
     // cross a later artwork replacement without losing that original SVG.
-    history.hydrate(Object.fromEntries(['past', 'future'].map(key => [key, saved.history[key].map(entry => ({ source: saved.source, name: saved.name, example: saved.example ?? '', ...entry }))])));
+    history.hydrate(Object.fromEntries(['past', 'future'].map(key => [key, saved.history[key].map(entry => ({ source: saved.source, name: saved.name, example: saved.example ?? '', measurements: structuredClone(state.measurements), ...entry }))])));
     lastSavedDocument = workspaceDocumentSignature(captureWorkspace());
     if (!state.areaSuggestions) refreshAreaSuggestions();
     render();

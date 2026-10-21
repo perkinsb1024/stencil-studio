@@ -17,6 +17,11 @@ export function updatePanHint(state, mode = $('#pan-preview').getAttribute('aria
     else if (mode) hint = 'Pan is on. Drag to move the canvas. Tap Space to turn Pan off and edit.';
     else hint = 'Drag to select or edit. Tap Space to toggle Pan, or hold Space and drag to pan.';
   }
+  if ($('#canvas-viewport').classList.contains('measuring')) {
+    hint = state.zoom < 1 ? 'Click two points to measure. Zoom to 100% to pan.'
+      : mode ? 'Pan is on. Drag to move the canvas. Tap Space to return to measuring.'
+      : 'Click two points to measure. Tap Space to toggle Pan, or hold Space and drag to pan.';
+  }
   $('#move-view-hint').textContent = hint;
 }
 

@@ -1,0 +1,72 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Measure and pan checks</title>
+<style>body{font:14px system-ui;padding:20px}.fail{color:#a00}iframe{width:1200px;height:1000px}</style>
+<h1>Measure and pan checks</h1><p id="summary">Running…</p><ol id="results"></ol><iframe id="editor"></iframe>
+<script type="module">
+import { previewReady } from './preview-ready.js';
+const frame=document.querySelector('#editor'), key='stencil-studio.workspace.v1:measure-pan-tests';
+localStorage.removeItem(key);
+await new Promise(resolve=>{frame.onload=resolve;frame.src='/?workspace=measure-pan-tests&live-reload=off';});
+const w=frame.contentWindow,d=frame.contentDocument,$=s=>d.querySelector(s);
+w.requestAnimationFrame=cb=>w.setTimeout(()=>cb(w.performance.now()),16);
+w.cancelAnimationFrame=id=>w.clearTimeout(id);
+const wait=async()=>{await new Promise(r=>setTimeout(r,180));await previewReady(d);};
+await wait();
+const assert=(v,m)=>{if(!v)throw Error(m);};
+const click=async s=>{$(s).click();await wait();};
+const space=type=>$('#preview-svg').dispatchEvent(new w.KeyboardEvent(type,{key:' ',code:'Space',bubbles:true,cancelable:true}));
+const save=()=>{w.dispatchEvent(new w.Event('stencil:before-reload'));return JSON.parse(localStorage.getItem(key));};
+const position=()=>{const ui=save().ui;return {x:ui.panX,y:ui.panY};};
+const count=()=>$('#measure-overlay').querySelectorAll('[data-measure]').length;
+function pointer(type,x,y,button=0){$('#preview-svg').dispatchEvent(new w.PointerEvent(type,{clientX:x,clientY:y,button,pointerId:39,isPrimary:true,bubbles:true,cancelable:true}));}
+function center(){const r=$('#canvas-viewport').getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2};}
+function drag(dx,dy,button=0){const p=center();pointer('pointerdown',p.x,p.y,button);pointer('pointermove',p.x+dx,p.y+dy,button);pointer('pointerup',p.x+dx,p.y+dy,button);}
+async function check(name,action){const li=document.createElement('li');try{await action();li.textContent=`PASS — ${name}`;}catch(e){li.className='fail';li.textContent=`FAIL — ${name}: ${e.message}`;}document.querySelector('#results').append(li);}
+await click('#edit-outlines');await click('#zoom-fit');await click('#measure-preview');
+await check('Measure options sit above the bottom toolbar and zoom has a separator',async()=>{
+ const options=$('#measure-controls').getBoundingClientRect(),viewport=$('#canvas-viewport').getBoundingClientRect(),bar=$('.canvas-bottom-bar').getBoundingClientRect();
+ assert(options.top>=viewport.bottom-1&&options.bottom<=bar.top+1,'Measure options are not at the bottom');
+ assert(parseFloat(w.getComputedStyle($('.canvas-zoom-buttons')).borderLeftWidth)>0,'Zoom divider missing');
+});
+await check('Holding Space pans without placing rulers or exiting Measure',async()=>{
+ const before=position();space('keydown');drag(30,20);space('keyup');
+ const after=position();assert(after.x===before.x+30&&after.y===before.y+20,'Space drag did not pan');
+ assert(count()===0&&!$('#measure-overlay .draft'),'Pan created a measurement');
+ assert($('#measure-preview').getAttribute('aria-pressed')==='true','Measure exited');
+ assert(!$('#canvas-viewport').classList.contains('pan-ready'),'Holding Space left Pan on');
+});
+await check('A pending ruler survives Space-drag and resumes placement',async()=>{
+ const p=center();pointer('pointerdown',p.x,p.y);pointer('pointerup',p.x,p.y);pointer('pointermove',p.x+20,p.y+15);
+ const label=$('#measure-overlay .draft text').textContent;
+ space('keydown');drag(-20,10);space('keyup');
+ assert($('#measure-overlay .draft text').textContent===label,'Pan changed the pending measurement');
+ const end=center();pointer('pointerdown',end.x+30,end.y+20);pointer('pointerup',end.x+30,end.y+20);
+ assert(count()===1&&!$('#measure-overlay .draft'),'Ruler did not finish after panning');
+});
+await check('Tapping Space toggles Pan while keeping Measure active',async()=>{
+ space('keydown');space('keyup');
+ assert($('#pan-preview').getAttribute('aria-pressed')==='true','Space did not turn Pan on');
+ const before=position();drag(10,-10);const after=position();
+ assert(after.x===before.x+10&&after.y===before.y-10&&count()===1,'Toggled pan changed rulers');
+ space('keydown');space('keyup');
+ assert($('#pan-preview').getAttribute('aria-pressed')==='false'&&$('#measure-preview').getAttribute('aria-pressed')==='true','Space did not return to Measure');
+});
+await check('Pan button and middle mouse preserve Measure mode and rulers',async()=>{
+ await click('#pan-preview');drag(10,10);await click('#pan-preview');
+ assert($('#measure-preview').getAttribute('aria-pressed')==='true','Pan button exited Measure');
+ const before=position();drag(-10,-10,1);const after=position();
+ assert(after.x===before.x-10&&after.y===before.y-10&&count()===1,'Middle mouse pan failed');
+});
+await check('Escape cancels a pan gesture before cancelling a pending ruler',async()=>{
+ const p=center();pointer('pointerdown',p.x,p.y);pointer('pointerup',p.x,p.y);
+ const before=position();space('keydown');pointer('pointerdown',p.x,p.y);pointer('pointermove',p.x+15,p.y+10);
+ $('#preview-svg').dispatchEvent(new w.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));space('keyup');
+ assert(JSON.stringify(position())===JSON.stringify(before),'Escape did not restore pan');
+ assert(!!$('#measure-overlay .draft'),'Escape cancelled the ruler instead of pan');
+ await click('#measure-cancel');
+});
+await check('Measure controls fit a phone viewport',async()=>{
+ frame.style.width='390px';await wait();await click('#measure-preview');
+ assert(d.documentElement.scrollWidth<=w.innerWidth,'Controls overflow the phone viewport');
+});
+const failed=document.querySelectorAll('.fail').length;document.querySelector('#summary').textContent=`${document.querySelectorAll('#results li').length-failed} passed; ${failed} failed.`;
+</script></html>

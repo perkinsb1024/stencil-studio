@@ -1,0 +1,55 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Measure snapping checks</title>
+<style>body{font:14px system-ui;padding:20px}.fail{color:#a00}iframe{width:1200px;height:1000px}</style>
+<h1>Measure snapping checks</h1><p id="summary">Running…</p><ol id="results"></ol><iframe id="editor"></iframe>
+<script type="module">
+import { previewReady } from './preview-ready.js';
+const frame=document.querySelector('#editor'),key='stencil-studio.workspace.v1:measure-snap-tests';localStorage.removeItem(key);
+await new Promise(resolve=>{frame.onload=resolve;frame.src='/?workspace=measure-snap-tests&live-reload=off';});
+let w=frame.contentWindow,d=frame.contentDocument;const $=s=>d.querySelector(s);
+const wait=async()=>{await new Promise(r=>setTimeout(r,180));await previewReady(d);};await wait();
+const assert=(v,m)=>{if(!v)throw Error(m);},near=(a,b)=>assert(Math.abs(a-b)<1e-6,`${a} != ${b}`);
+const click=async s=>{$(s).click();await wait();};
+const save=()=>{w.dispatchEvent(new w.Event('stencil:before-reload'));return JSON.parse(localStorage.getItem(key));};
+function pointer(type,p,target=$('#preview-svg')){const q=new w.DOMPoint(p.x,p.y).matrixTransform($('#preview-svg').getScreenCTM());target.dispatchEvent(new w.PointerEvent(type,{clientX:q.x,clientY:q.y,button:0,pointerId:29,isPrimary:true,bubbles:true,cancelable:true}));}
+function option(key,value){const input=$(`#measure-snap-${key}`);input.checked=value;input.dispatchEvent(new w.Event('change',{bubbles:true}));}
+function ruler(a,b){pointer('pointerdown',a);pointer('pointermove',b);pointer('pointerdown',b);return save().document.measurements.at(-1);}
+async function check(name,fn){const li=document.createElement('li');try{await fn();li.textContent=`PASS — ${name}`;}catch(e){li.className='fail';li.textContent=`FAIL — ${name}: ${e.message}`;}document.querySelector('#results').append(li);}
+await click('#edit-tabs');await click('#measure-preview');
+await check('Independent axis and diagonal checkboxes combine correctly',async()=>{
+ assert(!$('#measure-snap')&&['axes','diagonal','objects'].every(k=>$(`#measure-snap-${k}`).type==='checkbox'),'Snap checkboxes missing');
+ option('axes',true);let r=ruler({x:40,y:40},{x:80,y:43});near(r.b.y,r.a.y);
+ option('diagonal',true);r=ruler({x:40,y:40},{x:80,y:75});near(r.b.x-r.a.x,r.b.y-r.a.y);
+ option('axes',false);r=ruler({x:40,y:40},{x:74,y:75});near(Math.abs(r.b.x-r.a.x),Math.abs(r.b.y-r.a.y));
+ option('diagonal',false);
+});
+await check('Objects snaps the first point to a tab center and shows feedback',async()=>{
+ const marker=$('.tab-marker [data-screen-radius]');assert(marker,'Tab marker missing');
+ const tab=marker.tagName==='rect'?{x:+marker.getAttribute('x')+(+marker.getAttribute('width'))/2,y:+marker.getAttribute('y')+(+marker.getAttribute('height'))/2}:{x:+marker.getAttribute('cx'),y:+marker.getAttribute('cy')};
+ const scale=$('#preview-svg').getScreenCTM().a,p={x:tab.x+3/scale,y:tab.y+2/scale};
+ pointer('pointermove',p);assert(!$('.measure-snap-target'),'Objects snapped while disabled');
+ option('objects',true);pointer('pointermove',p);assert($('.measure-snap-target'),'Snap marker missing');
+ pointer('pointerdown',p,marker);pointer('pointermove',{x:15,y:15});pointer('pointerdown',{x:15,y:15});
+ const r=save().document.measurements.at(-1);near(r.a.x,tab.x);near(r.a.y,tab.y);
+});
+await check('SVG objects use crosshairs, rulers use pointers, and Space still uses Pan cursors',async()=>{
+ const checkbox=$('#measure-snap-objects');checkbox.focus();checkbox.dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:1}));
+ assert(d.activeElement!==checkbox,'Pointer checkbox focus would block Space panning');
+ const marker=$('.tab-marker [data-screen-radius]'),hit=$('#measure-overlay .ruler-hit');
+ assert(w.getComputedStyle(marker).cursor==='crosshair','Tab cursor is selectable');
+ assert(w.getComputedStyle(hit).cursor==='pointer','Ruler cursor is not selectable');
+ $('#preview-svg').dispatchEvent(new w.KeyboardEvent('keydown',{key:' ',code:'Space',repeat:false,bubbles:true,cancelable:true}));
+ assert(w.getComputedStyle(marker).cursor==='grab','Space cursor did not override measuring');
+ $('#preview-svg').dispatchEvent(new w.KeyboardEvent('keyup',{key:' ',code:'Space',bubbles:true,cancelable:true}));
+ // A quick tap toggles Pan; tap again to return to measuring.
+ $('#pan-preview').click();await wait();
+ assert(w.getComputedStyle(marker).cursor==='crosshair','Crosshair did not return');
+});
+await check('Checkbox choices persist after reload and controls fit a phone',async()=>{
+ option('axes',true);option('diagonal',false);option('objects',true);save();
+ await new Promise(resolve=>{frame.onload=resolve;w.location.reload();});w=frame.contentWindow;d=frame.contentDocument;await wait();
+ await click('#measure-preview');
+ assert($('#measure-snap-axes').checked&&!$('#measure-snap-diagonal').checked&&$('#measure-snap-objects').checked,'Choices did not restore');
+ frame.style.width='390px';await wait();assert(d.documentElement.scrollWidth<=w.innerWidth,'Phone overflow');
+});
+const failed=document.querySelectorAll('.fail').length;document.querySelector('#summary').textContent=`${document.querySelectorAll('#results li').length-failed} passed; ${failed} failed.`;
+</script></html>

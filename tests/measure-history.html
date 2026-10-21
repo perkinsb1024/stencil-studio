@@ -1,0 +1,65 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Measure drag, history and export checks</title>
+<style>body{font:14px system-ui;padding:20px}.fail{color:#a00}iframe{width:1200px;height:1000px}</style>
+<h1>Measure drag, history and export checks</h1><p id="summary">Running…</p><ol id="results"></ol><iframe id="editor"></iframe>
+<script type="module">
+import { previewReady } from './preview-ready.js';
+const frame=document.querySelector('#editor'),key='stencil-studio.workspace.v1:measure-history-tests';localStorage.removeItem(key);
+await new Promise(resolve=>{frame.onload=resolve;frame.src='/?workspace=measure-history-tests&live-reload=off';});
+let w=frame.contentWindow,d=frame.contentDocument;const $=s=>d.querySelector(s);
+const wait=async()=>{await new Promise(r=>setTimeout(r,180));await previewReady(d);};await wait();
+const assert=(v,m)=>{if(!v)throw Error(m);},near=(a,b)=>assert(Math.abs(a-b)<1e-6,`${a} != ${b}`);
+const click=async s=>{$(s).click();await wait();};
+const save=()=>{w.dispatchEvent(new w.Event('stencil:before-reload'));return JSON.parse(localStorage.getItem(key));};
+const rulers=()=>save().document.measurements;
+function pointer(type,p,{altKey=false,target=$('#preview-svg')}={}){const q=new w.DOMPoint(p.x,p.y).matrixTransform($('#preview-svg').getScreenCTM());target.dispatchEvent(new w.PointerEvent(type,{clientX:q.x,clientY:q.y,button:0,pointerId:29,isPrimary:true,bubbles:true,cancelable:true,altKey}));}
+function drag(a,b,options={}){pointer('pointerdown',a,options);pointer('pointermove',b,options);pointer('pointerup',b,options);}
+function option(key,value){const input=$(`#measure-snap-${key}`);input.checked=value;input.dispatchEvent(new w.Event('change',{bubbles:true}));}
+function shortcut(shift=false){$('#preview-svg').dispatchEvent(new w.KeyboardEvent('keydown',{key:'z',ctrlKey:true,shiftKey:shift,bubbles:true,cancelable:true}));}
+async function check(name,fn){const li=document.createElement('li');try{await fn();li.textContent=`PASS — ${name}`;}catch(e){li.className='fail';li.textContent=`FAIL — ${name}: ${e.message}`;}document.querySelector('#results').append(li);}
+await click('#edit-tabs');await click('#measure-preview');
+await check('Dragging creates exactly one ruler on release and a single undo entry',async()=>{
+ const past=save().history.past.length;pointer('pointerdown',{x:30,y:30});pointer('pointermove',{x:80,y:50});
+ assert(rulers().length===0&&!!$('#measure-overlay .draft'),'Drag committed before release');
+ pointer('pointerup',{x:80,y:50});assert(rulers().length===1&&!$('#measure-overlay .draft'),'Release did not finish');
+ assert(save().history.past.length===past+1,'Drag did not create one undo step');near(rulers()[0].b.x,80);near(rulers()[0].b.y,50);
+ await click('#undo');assert(rulers().length===0,'Undo add failed');await click('#redo');assert(rulers().length===1,'Redo add failed');
+});
+await check('Two clicks remain available and keyboard undo/redo works',async()=>{
+ pointer('pointerdown',{x:20,y:80});pointer('pointerup',{x:20,y:80});pointer('pointermove',{x:60,y:90});
+ assert(rulers().length===1,'First click completed ruler');pointer('pointerdown',{x:60,y:90});pointer('pointerup',{x:60,y:90});
+ assert(rulers().length===2,'Second click did not finish');shortcut();await wait();assert(rulers().length===1,'Keyboard undo failed');shortcut(true);await wait();assert(rulers().length===2,'Keyboard redo failed');
+});
+await check('Angle snap engages within five degrees and Alt overrides it during drag',async()=>{
+ option('axes',true);drag({x:30,y:30},{x:80,y:33});near(rulers().at(-1).b.y,30);
+ drag({x:30,y:30},{x:80,y:40});near(rulers().at(-1).b.y,40);
+ pointer('pointerdown',{x:30,y:30});pointer('pointermove',{x:80,y:33});
+ $('#preview-svg').dispatchEvent(new w.KeyboardEvent('keydown',{key:'Alt',altKey:true,bubbles:true}));
+ pointer('pointerup',{x:80,y:33},{altKey:true});near(rulers().at(-1).b.y,33);
+ $('#preview-svg').dispatchEvent(new w.KeyboardEvent('keyup',{key:'Alt',bubbles:true}));option('axes',false);
+});
+await check('Cancelled and zero-length drags leave history unchanged',async()=>{
+ const before=save(),count=rulers().length;pointer('pointerdown',{x:30,y:30});pointer('pointermove',{x:70,y:50});pointer('pointercancel',{x:70,y:50});
+ assert(rulers().length===count&&!$('#measure-overlay .draft'),'Cancelled drag committed');assert(save().history.past.length===before.history.past.length,'Cancelled drag recorded history');
+ pointer('pointerdown',{x:30,y:30});pointer('pointerup',{x:30,y:30});
+ $('#preview-svg').dispatchEvent(new w.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));assert(rulers().length===count,'Zero-length ruler added');
+});
+await check('Delete and Delete All can each be undone and redone',async()=>{
+ drag({x:40,y:100},{x:90,y:100});const count=rulers().length;
+ await click('#measure-delete');assert(rulers().length===count-1,'Delete failed');await click('#undo');assert(rulers().length===count,'Undo delete failed');
+ await click('#measure-clear');assert(rulers().length===0,'Delete All failed');await click('#undo');assert(rulers().length===count,'Undo Delete All failed');await click('#redo');assert(rulers().length===0,'Redo Delete All failed');await click('#undo');
+});
+await check('Session export contains rulers and history while stencil SVG contains only cut geometry',async()=>{
+ let blob;const original=w.URL.createObjectURL;w.URL.createObjectURL=value=>{blob=value;return original.call(w.URL,value);};const originalClick=w.HTMLAnchorElement.prototype.click;w.HTMLAnchorElement.prototype.click=function(){};
+ try{
+  assert(!$('#measure-export')&&!$('#include-rulers'),'SVG ruler export controls remain');
+  $('#download').click();const xml=await blob.text();assert(!xml.includes('id="measurements"')&&!xml.includes('data-ruler='),'Stencil SVG included rulers');
+  assert(new w.DOMParser().parseFromString(xml,'image/svg+xml').querySelector('path'),'Stencil SVG omitted cuts');
+  $('#export-session').click();const session=JSON.parse(await blob.text());assert(session.document.measurements.length===rulers().length,'Session omitted rulers');assert(session.history.past.some(s=>s.measurements?.length),'Session omitted ruler history');
+ }finally{w.URL.createObjectURL=original;w.HTMLAnchorElement.prototype.click=originalClick;}
+});
+await check('Rulers and undo history survive a reload',async()=>{
+ const count=rulers().length;save();await new Promise(resolve=>{frame.onload=resolve;w.location.reload();});w=frame.contentWindow;d=frame.contentDocument;await wait();
+ assert(rulers().length===count,'Reload lost rulers');await click('#redo');assert(rulers().length===0,'Reload lost redo');await click('#undo');assert(rulers().length===count,'Reload lost undo');
+});
+const failed=document.querySelectorAll('.fail').length;document.querySelector('#summary').textContent=`${document.querySelectorAll('#results li').length-failed} passed; ${failed} failed.`;
+</script></html>
