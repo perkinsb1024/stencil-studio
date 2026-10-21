@@ -118,6 +118,25 @@ test('regions saved before adjustable tapers still load alongside new regions an
   assert.deepEqual(readWorkspace(store), saved);
 });
 
+test('regional styles survive storage and history while invalid styles are rejected', () => {
+  const store = storage();
+  const styled = { ...document, regions: [{ ...widthRegion, roundedTabs: true, roundedChannelCorners: false }] };
+  const saved = { ...workspace, document: styled, ui: { ...workspace.ui, regionRoundedTabs: 'true', regionRoundedChannelCorners: 'inherit' }, history: { past: [document, styled], future: [styled] } };
+  writeWorkspace(store, saved);
+  assert.deepEqual(readWorkspace(store), saved);
+  for (const property of ['roundedTabs', 'roundedChannelCorners']) {
+    for (const value of ['true', 1, null]) {
+      const invalid = { ...document, regions: [{ ...widthRegion, [property]: value }] };
+      for (const change of [{ document: invalid }, { history: { past: [invalid], future: [] } }]) {
+        store.setItem(workspaceKey, JSON.stringify({ ...saved, ...change }));
+        assert.equal(readWorkspace(store), null);
+      }
+    }
+  }
+  store.setItem(workspaceKey, JSON.stringify({ ...saved, ui: { ...saved.ui, regionRoundedTabs: 'invalid' } }));
+  assert.equal(readWorkspace(store), null);
+});
+
 test('rounded tab setting survives storage and validates mixed old/new history', () => {
   const store = storage();
   const rounded = { ...document, settings: { ...document.settings, roundedTabs: true } };
@@ -185,6 +204,17 @@ test('guided workflow, review decisions and stable region names round trip with 
   }
   for (const change of [{ workflowStep: 4 }, { activeTool: 'unknown' }, { reviewRegion: 'bad' }, { showBridges: 'true' }]) {
     store.setItem(workspaceKey, JSON.stringify({ ...saved, ui: { ...saved.ui, ...change } }));
+    assert.equal(readWorkspace(store), null);
+  }
+});
+
+test('units and grid preferences round trip and reject invalid values', () => {
+  const store = storage();
+  const saved = { ...workspace, ui: { ...workspace.ui, units: 'in', showGrid: true, gridSpacing: 25.4 } };
+  writeWorkspace(store, saved);
+  assert.deepEqual(readWorkspace(store), saved);
+  for (const invalid of [{ units: 'cm' }, { showGrid: 1 }, { gridSpacing: 0 }, { gridSpacing: 102 }, { gridSpacing: '25.4' }]) {
+    store.setItem(workspaceKey, JSON.stringify({ ...saved, ui: { ...saved.ui, ...invalid } }));
     assert.equal(readWorkspace(store), null);
   }
 });

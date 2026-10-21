@@ -12,7 +12,7 @@ function assert(value, message = 'Unexpected result') { if (!value) throw new Er
 async function check(name, action) {
   const li = document.createElement('li');
   try { await action(); li.textContent = `PASS — ${name}`; }
-  catch (error) { li.textContent = `FAIL — ${name}: ${error.message}`; li.className = 'fail'; }
+  catch (error) { li.textContent = `FAIL — ${name}: ${error.message}`; li.className = 'fail'; li.dataset.stack = error.stack; }
   document.querySelector('#results').append(li);
 }
 async function load(action) {
@@ -40,7 +40,14 @@ function pointer(type, target, x, y, pointerId = 1) {
 async function polygon(points, close = true) {
   await click('#draw-region');
   for (const [x, y] of points) await corner(x, y);
-  if (close) await click('#finish-region');
+  if (close) {
+    const count = saved().document.regions.length;
+    await click('#finish-region');
+    if (saved().document.regions.length > count) {
+      await click('#cancel-region');
+      await change('#region-picker', saved().document.regions.at(-1).id);
+    }
+  }
 }
 function caret(panelId, buttonId) {
   assert($(buttonId).getAttribute('aria-pressed') === 'true');
@@ -48,19 +55,21 @@ function caret(panelId, buttonId) {
 }
 
 await load(() => { frame.src = '/?workspace=region-editing-tests&live-reload=off'; });
-await check('Edit regions is a separate mode beside a stable canvas with a layer and width selector', async () => {
+await check('Edit regions is a separate mode beside a stable canvas with an object and width selector', async () => {
   const source = '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 20H100"/><path d="M0 50H100"/></svg>';
   const transfer = new w.DataTransfer(); transfer.items.add(new w.File([source], 'regions.svg', { type: 'image/svg+xml' }));
   $('#file-input').files = transfer.files; $('#file-input').dispatchEvent(new w.Event('change'));
   for (let i = 0; i < 50 && $('#filename').textContent !== 'regions.svg'; i++) await sleep(20);
   await change('#channelWidth', 8); await change('#tabCount', 1);
+  await click('#step-next');
   const before = $('#preview-svg').getBoundingClientRect();
   await click('#edit-tabs'); await click('#edit-regions');
   assert(!$('#region-inspector').hidden && $('#tab-inspector').hidden && $('#outline-inspector').hidden);
   assert($('#edit-regions').getAttribute('aria-pressed') === 'true');
   assert($('#region-scope').options.length === 3 && $('#region-scope').value === 'outline-0');
   assert(Math.abs(before.width - $('#preview-svg').getBoundingClientRect().width) < 1);
-  assert($('#region-inspector').getBoundingClientRect().bottom <= $('#canvas-area').getBoundingClientRect().top);
+  const panel = $('#region-inspector').getBoundingClientRect(), canvas = $('#canvas-area').getBoundingClientRect();
+  assert(panel.right <= canvas.left || panel.top >= canvas.bottom, 'Region controls overlap the canvas');
   caret('#region-inspector', '#edit-regions');
 });
 let originalCuts, firstId;
@@ -84,7 +93,7 @@ await check('Width and all-layer scope changes affect existing regions and suppo
   await click('#select-region-layer');
   assert($('#select-region-layer').getAttribute('aria-pressed') === 'true');
   assert(d.querySelectorAll('[data-region-layer]').length === 2);
-  await corner(50, 30); assert($('#select-region-layer').getAttribute('aria-pressed') === 'true', 'Empty space selected a layer');
+  await corner(50, 30); assert($('#select-region-layer').getAttribute('aria-pressed') === 'true', 'Empty space selected an object');
   pointer('pointermove', $('#preview-svg'), 50, 53);
   assert($('[data-region-layer="outline-1"]').classList.contains('hovered'));
   pointer('pointerdown', $('[data-region-layer="outline-1"]'), 50, 53);
@@ -92,7 +101,7 @@ await check('Width and all-layer scope changes affect existing regions and suppo
   await corner(50, 53);
   assert($('#region-scope').value === 'outline-1' && saved().document.regions[0].contourId === 'outline-1');
   assert(inside(50, 11) && !inside(50, 56), 'Picked scope did not update the stencil');
-  assert(JSON.stringify(saved().document.regions[0].points) === points, 'Picking a layer moved the region');
+  assert(JSON.stringify(saved().document.regions[0].points) === points, 'Picking an object moved the region');
   assert($('#select-region-layer').getAttribute('aria-pressed') === 'false' && !$('.region-layer-targets'));
   await click('#undo'); assert($('#region-scope').value === 'outline-0');
   await click('#select-region-layer');
@@ -173,6 +182,7 @@ await check('Keyboard corner movement, cancellation and invalid polygon rejectio
   const final = client(60, 30);
   $('#preview-svg').dispatchEvent(new w.MouseEvent('dblclick', { bubbles: true, clientX: final.x, clientY: final.y, detail: 2, cancelable: true })); await sleep(30);
   assert(saved().document.regions.length === 2 && saved().document.regions[1].points.length === 3, 'Double-click did not add and finish the third corner');
+  await click('#cancel-region');
   await click('#undo'); assert(saved().document.regions.length === 1);
 });
 await check('Later regions override overlaps; removing a region restores the earlier width', async () => {
@@ -244,6 +254,33 @@ await check('Region controls and active tools fit mobile and tablet layouts', as
     await click('#edit-outlines'); caret('#outline-inspector', '#edit-outlines');
     await click('#edit-regions');
   }
+});
+await check('Regional style controls apply, undo, inherit and recover after reload', async () => {
+  await change('#region-picker', firstId);
+  assert($('#region-roundedTabs').value === 'inherit' && $('#region-roundedChannelCorners').value === 'inherit');
+  const historySize = saved().history.past.length;
+  await change('#region-roundedTabs', 'true');
+  assert(saved().document.regions.find(r => r.id === firstId).roundedTabs === true);
+  assert(saved().history.past.length === historySize + 1);
+  await click('#undo');
+  assert($('#region-roundedTabs').value === 'inherit');
+  await click('#redo');
+  assert($('#region-roundedTabs').value === 'true');
+  await change('#region-roundedChannelCorners', 'false');
+  saved(); await load(() => w.location.reload());
+  assert($('#region-roundedTabs').value === 'true' && $('#region-roundedChannelCorners').value === 'false');
+  let blob;
+  const create = w.URL.createObjectURL, anchorClick = w.HTMLAnchorElement.prototype.click;
+  w.URL.createObjectURL = value => { blob = value; return 'blob:region-test'; };
+  w.HTMLAnchorElement.prototype.click = function() {};
+  try {
+    await click('#export-session');
+    const region = JSON.parse(await blob.text()).document.regions.find(r => r.id === firstId);
+    assert(region.roundedTabs === true && region.roundedChannelCorners === false);
+  } finally { w.URL.createObjectURL = create; w.HTMLAnchorElement.prototype.click = anchorClick; }
+  await change('#region-roundedTabs', 'inherit'); await change('#region-roundedChannelCorners', 'inherit');
+  const region = saved().document.regions.find(r => r.id === firstId);
+  assert(region.roundedTabs === undefined && region.roundedChannelCorners === undefined);
 });
 await check('Settings resets preserve regions and new artwork clears them', async () => {
   await click('#reset'); assert(saved().document.regions.length === 3);

@@ -1,0 +1,75 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Units and grid checks</title>
+<style>body{font:15px system-ui;padding:24px}.fail{color:#b22}iframe{width:1200px;height:1000px}</style>
+<h1>Units and grid checks</h1><p id="summary">Running…</p><ol id="results"></ol><iframe id="editor"></iframe>
+<script type="module">
+import { previewReady } from './preview-ready.js';
+const frame = document.querySelector('#editor'), key = 'stencil-studio.workspace.v1:units-grid-tests';
+localStorage.removeItem(key);
+let w, d;
+const $ = selector => d.querySelector(selector);
+const assert = (value, message) => { if (!value) throw new Error(message); };
+const near = (value, expected) => assert(Math.abs(Number(value) - expected) < 0.0001, `${value} != ${expected}`);
+const tick = async () => { await new Promise(resolve => setTimeout(resolve, 60)); await previewReady(d); };
+const click = async selector => { $(selector).click(); await tick(); };
+const change = async (selector, value, type = 'change') => { $(selector).value = value; $(selector).dispatchEvent(new w.Event(type, { bubbles: true })); await tick(); };
+const save = () => { w.dispatchEvent(new w.Event('stencil:before-reload')); return JSON.parse(localStorage.getItem(key)); };
+async function load() {
+  await new Promise(resolve => { frame.onload = resolve; frame.src = '/?workspace=units-grid-tests&live-reload=off'; });
+  w = frame.contentWindow; d = w.document;
+  w.requestAnimationFrame = callback => w.setTimeout(() => callback(w.performance.now()), 16);
+  w.cancelAnimationFrame = id => w.clearTimeout(id);
+  await tick();
+}
+async function check(name, action) {
+  const li = document.createElement('li');
+  try { await action(); li.textContent = `PASS — ${name}`; }
+  catch (error) { li.className = 'fail'; li.textContent = `FAIL — ${name}: ${error.message}`; }
+  document.querySelector('#results').append(li);
+}
+await load();
+await check('Unit switching preserves geometry and converts dimensions and widths', async () => {
+  const before = $('.cut-shape').getAttribute('d');
+  await click('[data-units="in"]');
+  near($('#artworkWidth').value, 150 / 25.4);
+  near($('#channelWidth').value, 1.5 / 25.4);
+  assert($('#dimension-width').textContent.endsWith(' in'), 'Sheet label did not convert');
+  assert($('.cut-shape').getAttribute('d') === before, 'Unit switch changed the geometry');
+  await change('#artworkWidth', '6');
+  near(save().document.settings.artworkWidth, 152.4);
+  await change('#channelWidth', '0.1');
+  near(save().document.settings.channelWidth, 2.54);
+  await click('[data-units="mm"]');
+  near($('#artworkWidth').value, 152.4);
+  near($('#channelWidth').value, 2.54);
+});
+await check('Bridge and region controls interpret inch values in physical millimeters', async () => {
+  await click('#edit-bridges');
+  await click('[data-units="in"]');
+  await change('#bridge-width', '0.2');
+  near(save().document.bridgeWidth, 5.08);
+  await click('#edit-regions');
+  await change('#region-width', '0.1');
+  near(save().ui.regionWidth, 2.54);
+  await click('[data-units="mm"]');
+  near($('#bridge-width').value, 5.08);
+  near($('#region-width').value, 2.54);
+});
+await check('Grid defaults to one inch, changes spacing, and ignores pointer events', async () => {
+  assert(!$('#preview-grid'), 'Grid should start off');
+  await click('#show-grid');
+  near($('#preview-grid-pattern').getAttribute('width'), 25.4);
+  assert($('#preview-grid').getAttribute('pointer-events') === 'none', 'Grid intercepts editing');
+  await change('#grid-spacing', '0.5', 'input');
+  near($('#preview-grid-pattern').getAttribute('width'), 12.7);
+  await click('[data-units="in"]');
+  assert($('#grid-spacing-value').textContent === '0.5 in', 'Grid label did not convert');
+});
+await check('Units and grid preferences survive reload without altering physical spacing', async () => {
+  save(); await load();
+  assert($('[data-units="in"]').getAttribute('aria-pressed') === 'true', 'Units not restored');
+  assert($('#show-grid').checked && $('#preview-grid'), 'Grid not restored');
+  near($('#preview-grid-pattern').getAttribute('width'), 12.7);
+  near($('#artworkWidth').value, 6);
+});
+document.querySelector('#summary').textContent = `${document.querySelectorAll('#results li:not(.fail)').length} passed; ${document.querySelectorAll('.fail').length} failed.`;
+</script></html>

@@ -23,7 +23,7 @@ test('Keep subtracts an island from Cut Away with exact boundaries and diagnoses
   assert.equal(result.components.length, 2);
 });
 
-test('layer order supports both cuts inside Keep and Keep inside cuts', () => {
+test('object order supports both cuts inside Keep and Keep inside cuts', () => {
   const hole = shape(2, rectangle(47, 47, 6, 6));
   const settings = { ...options, materialTreatments: { ...options.materialTreatments, 'shape-2': 'cut' } };
   assert.equal(cut(generateStencil([outer, island, hole], settings), 50, 50), true);

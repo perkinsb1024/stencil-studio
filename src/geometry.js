@@ -59,9 +59,9 @@ export function generateStencil(contours, options, onProgress = () => {}) {
     const tabs = resolveTabs(contour, options, layout);
     if (!layout) reducedTabs ||= tabs.length < tabCount || tabs.some(t => t.width < t.requestedWidth - 1e-7);
     else {
-      if (!tabs.length && closed) warnings.push(`Layer ${index + 1} has no tabs; its inner piece may come loose.`);
+      if (!tabs.length && closed) warnings.push(`Object ${index + 1} has no tabs; its inner piece may come loose.`);
       for (const tab of tabs) if (tab.width < tab.requestedWidth - 1e-7) {
-        warnings.push(`Layer ${index + 1}: a requested ${tab.requestedWidth.toFixed(1)} mm tab is ${tab.width.toFixed(1)} mm to fit the layer.`);
+        warnings.push(`Object ${index + 1}: a requested ${tab.requestedWidth.toFixed(1)} mm tab is ${tab.width.toFixed(1)} mm to fit the object.`);
       }
     }
     const gaps = [];
@@ -79,7 +79,7 @@ export function generateStencil(contours, options, onProgress = () => {}) {
     if (tabs.some((a, i) => tabs.slice(i + 1).some(b => {
       const delta = Math.abs(a.center - b.center);
       return (closed ? Math.min(delta, length - delta) : delta) < (a.gapWidth + b.gapWidth) / 2 - 1e-7;
-    }))) warnings.push(`Layer ${index + 1} has overlapping tabs; move or remove a tab to separate them.`);
+    }))) warnings.push(`Object ${index + 1} has overlapping tabs; move or remove a tab to separate them.`);
     gaps.sort((a, b) => a[0] - b[0]);
     const intervals = [];
     let cursor = 0;
@@ -91,7 +91,10 @@ export function generateStencil(contours, options, onProgress = () => {}) {
       pieces.push({ points: [...last.points, ...first.points.slice(1)], start: last.start, end: first.end });
     }
     const profile = createChannelWidthProfile(contourId, options);
-    for (const piece of pieces) ribbons.push(...channelPaths(piece.points, closed && !tabs.length, profile, options.roundedTabs ? piece : {}, options.roundedChannelCorners !== false));
+    for (const piece of pieces) ribbons.push(...channelPaths(piece.points, closed && !tabs.length, profile, {
+      start: piece.start && profile.shapeAt(piece.points[0], 'roundedTabs'),
+      end: piece.end && profile.shapeAt(piece.points.at(-1), 'roundedTabs'),
+    }, options.roundedChannelCorners !== false));
   }
   onProgress(0.7);
   const clipper = new ClipperLib.Clipper();

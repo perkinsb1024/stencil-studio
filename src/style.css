@@ -23,20 +23,27 @@
 .pan-ready,.pan-ready *{cursor:grab!important}
 .is-panning,.is-panning *{cursor:grabbing!important;user-select:none}
 .is-panning .sheet-wrap{transition:none}
-.bridge-highlight{fill:var(--bridge-color);fill-opacity:.28;stroke:var(--bridge-color);stroke-width:.25;pointer-events:none}
-.region-bridge.selected .bridge-highlight{fill-opacity:.5;stroke:#ff2da6;stroke-width:.45}
-.bridge-hit{fill:none;stroke:transparent;stroke-width:16;pointer-events:stroke;cursor:grab}
+.canvas-viewport:has(.editing-outlines,.editing-tabs:not(.adding-tab),.editing-bridges:not(.adding-bridge)){cursor:crosshair}
+.bridge-highlight{fill:var(--bridge-color);fill-opacity:.09;stroke:var(--bridge-color);stroke-width:calc(var(--bridge-handle-unit) * .8);stroke-linejoin:round;pointer-events:none}
+.region-bridge.selected .bridge-highlight{fill-opacity:.16;stroke-width:calc(var(--bridge-handle-unit) * 1.6)}
+.bridge-hit{fill:transparent;stroke:none;pointer-events:all;cursor:move}
 .bridge-hit:active{cursor:grabbing}
-.bridge-control-guide{fill:none;stroke:#258477;stroke-width:1;stroke-dasharray:4 3;opacity:.6}
-.region-bridge circle{fill:white;stroke:var(--bridge-color);stroke-width:2;cursor:grab}
+.bridge-control-guide{fill:none;stroke:var(--bridge-color);stroke-width:calc(var(--bridge-handle-unit) * .75);stroke-dasharray:calc(var(--bridge-handle-unit) * 3) calc(var(--bridge-handle-unit) * 3);opacity:.5}
+.bridge-handle-hit{fill:transparent;stroke:none;pointer-events:all;cursor:grab}
+.bridge-handle{fill:var(--bridge-color);stroke:#f5f8fc;stroke-width:calc(var(--bridge-handle-unit) * .75);pointer-events:none}
+.bridge-handle-feedback{visibility:hidden;pointer-events:none;fill:none}
+.bridge-handle-feedback circle{stroke:var(--bridge-color);stroke-width:calc(var(--bridge-handle-unit) * 1.5)}
+.bridge-handle-feedback circle:first-child{stroke:#fffef9;stroke-width:calc(var(--bridge-handle-unit) * 4)}
 .region-bridge [tabindex]:focus{outline:none}
-.region-bridge:has(:focus-visible) .bridge-highlight{stroke:#ff2da6;stroke-width:.45;fill-opacity:.5}
+.region-bridge:has(:focus-visible) .bridge-highlight{fill-opacity:.22;stroke-width:calc(var(--bridge-handle-unit) * 2)}
 /* Highlight the actual drag target, rather than its entire parent group. */
-.region-bridge:has(>.bridge-hit:hover) .bridge-highlight{fill-opacity:.75;stroke:#ff2da6;stroke-width:.6}
-.region-bridge circle:hover,.region-bridge circle:focus-visible{fill:#ff2da6;stroke:#502c6c;stroke-width:3}
+.region-bridge:has(>.bridge-hit:hover) .bridge-highlight{fill-opacity:.24;stroke-width:calc(var(--bridge-handle-unit) * 2.4)}
+.bridge-handle-hit:hover+.bridge-handle,.bridge-handle-hit:focus-visible+.bridge-handle{fill:color-mix(in srgb,var(--bridge-color) 80%,#203040);stroke:#fffef9}
+.bridge-handle-hit:hover+.bridge-handle+.bridge-handle-feedback,.bridge-handle-hit:focus-visible+.bridge-handle+.bridge-handle-feedback{visibility:visible}
 .region-bridge circle:active{cursor:grabbing}
 .unsupported-material{fill:#e59338;fill-opacity:.18;stroke:#c66e28;stroke-width:.35;stroke-dasharray:1 1}
 .editing-bridges{touch-action:none}
+#preview-svg{overflow:hidden}
 .adding-bridge,.adding-bridge *{cursor:crosshair}
 .visibility-outline:focus{outline:none}
 .editing-outlines .visibility-outline{cursor:pointer}
@@ -55,6 +62,9 @@
 .outline-hit-targets>path{cursor:pointer;pointer-events:stroke}
 .adding-tab,.adding-tab .tab-marker,.adding-tab .outline-hit-targets>path{cursor:crosshair}
 #tab-selection-box,#bridge-selection-box{fill:#258477;fill-opacity:0.12;stroke:#258477;stroke-width:1;stroke-dasharray:4 3;vector-effect:non-scaling-stroke;pointer-events:none}
+#bridge-selection-box{fill:var(--bridge-automatic);stroke:var(--bridge-automatic)}
+.selection-margin-overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:hidden}
+.selection-margin-box{fill:#888;fill-opacity:.06;stroke:#99949e;stroke-width:1;stroke-dasharray:4 3;vector-effect:non-scaling-stroke}
 .width-region path{fill:#218c83;fill-opacity:.08;stroke:#258477;stroke-width:1.5;stroke-dasharray:5 3;cursor:move}
 .width-region.selected path{fill-opacity:.14;stroke:#117569;stroke-width:2;stroke-dasharray:none}
 .width-region text{fill:#176c63;paint-order:stroke;stroke:#fffef9;stroke-width:.6;stroke-linejoin:round}

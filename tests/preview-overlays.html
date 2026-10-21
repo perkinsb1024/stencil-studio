@@ -1,0 +1,78 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Preview overlay checks</title>
+<style>body{font:14px system-ui;padding:24px}li{margin:8px 0}.fail{color:#a00}iframe{width:1280px;height:900px}</style>
+<h1>Preview overlays</h1><p id="summary">Running…</p><ol id="results"></ol><iframe title="Preview under test"></iframe>
+<script type="module">
+import { previewReady } from './preview-ready.js';
+const frame = document.querySelector('iframe'), key = 'stencil-studio.workspace.v1:preview-overlay-tests';
+localStorage.removeItem(key);
+let d, w;
+const $ = selector => d.querySelector(selector);
+const assert = (value, message = 'Unexpected result') => { if (!value) throw new Error(message); };
+const tick = async () => { await new Promise(resolve => setTimeout(resolve, 60)); await previewReady(d); };
+const click = async selector => { $(selector).click(); await tick(); };
+async function check(name, action) {
+  const li = document.createElement('li');
+  try { await action(); li.textContent = `PASS — ${name}`; }
+  catch (error) { li.textContent = `FAIL — ${name}: ${error.message}`; li.className = 'fail'; }
+  document.querySelector('#results').append(li);
+}
+async function load(reload = false) {
+  await new Promise(resolve => { frame.onload = resolve; if (reload) w.location.reload(); else frame.src = '/?workspace=preview-overlay-tests&live-reload=off'; });
+  w = frame.contentWindow; d = w.document;
+  w.requestAnimationFrame = callback => w.setTimeout(() => callback(w.performance.now()), 16);
+  w.cancelAnimationFrame = id => w.clearTimeout(id);
+  await tick();
+}
+function save() { w.dispatchEvent(new w.Event('stencil:before-reload')); return JSON.parse(localStorage.getItem(key)); }
+await load();
+await click('#step-next'); await click('#edit-tabs');
+await check('Stencil forces highlights on and disables the two checkboxes', async () => {
+  for (const id of ['#show-tabs', '#show-bridges']) assert($(id).checked && $(id).disabled);
+  assert($('.tab-markers'));
+});
+await check('Cut Paths can hide tab markers and the selected outline without changing cut geometry', async () => {
+  await click('#cut-view');
+  assert(!$('#show-tabs').disabled && !$('#show-bridges').disabled);
+  const before = $('.cut-shape').getAttribute('d');
+  await click('#show-tabs'); await click('#show-bridges');
+  assert(!$('.tab-markers') && !$('.material-bridge-overlays .region-bridge'));
+  assert(!$('#preview-svg > path[stroke-dasharray]'), 'Selected outline guide remains');
+  assert($('.cut-shape').getAttribute('d') === before);
+});
+await check('Stencil temporarily shows highlights and returning to Cut Paths restores the hidden choices', async () => {
+  await click('#material-view');
+  assert($('#show-tabs').checked && $('#show-tabs').disabled && $('.tab-markers'));
+  await click('#cut-view');
+  assert(!$('#show-tabs').checked && !$('#show-bridges').checked && !$('.tab-markers'));
+});
+await check('Adding tabs and restoring automatic tabs turn tab highlights back on', async () => {
+  await click('#add-tab'); assert($('#show-tabs').checked && $('.tab-markers'));
+  await click('#add-tab'); await click('#show-tabs');
+  $('#tabCount').value = 5; $('#tabCount').dispatchEvent(new w.Event('change', { bubbles: true })); await tick();
+  assert($('#show-tabs').checked && $('.tab-markers'));
+});
+await check('Bridge editor obeys its checkbox and adding or regenerating restores highlights', async () => {
+  const saved = save();
+  saved.document.regionBridges = [{ id: 'bridge-overlay-test', a: { x: 0.02, y: 0.02 }, b: { x: 0.2, y: 0.02 }, width: 3, automatic: false }];
+  localStorage.setItem(key, JSON.stringify(saved)); await load(true);
+  await click('#edit-bridges');
+  assert(!$('#show-bridges').checked && !$('.region-bridge'));
+  await click('#show-bridges'); assert($('.region-bridge'));
+  await click('#show-bridges'); assert(!$('.region-bridge') && !$('.unsupported-material'));
+  await click('#edit-tabs'); await click('#material-view');
+  assert($('#show-bridges').checked && $('#show-bridges').disabled && $('.region-bridge'));
+  await click('#cut-view'); await click('#edit-bridges'); assert(!$('.region-bridge'));
+  await click('#add-bridge'); assert($('#show-bridges').checked && $('.region-bridge'));
+  await click('#add-bridge'); await click('#show-bridges');
+  await click('#generate-bridges'); assert($('#show-bridges').checked);
+});
+await check('Hidden cut-view highlights survive reload', async () => {
+  if ($('#show-tabs').checked) await click('#show-tabs');
+  if ($('#show-bridges').checked) await click('#show-bridges');
+  save(); await load(true);
+  assert(!$('#show-tabs').checked && !$('#show-bridges').checked);
+  assert(!$('.tab-markers') && !$('.region-bridge') && !$('.unsupported-material'));
+});
+const failures = document.querySelectorAll('.fail').length;
+document.querySelector('#summary').textContent = `${document.querySelectorAll('li:not(.fail)').length} passed; ${failures} failed.`;
+</script></html>

@@ -3,7 +3,7 @@ import { generateStencil, measureContour } from './geometry.js';
 const SCALE = 10000;
 const labels = { outline: 'Outline', keep: 'Keep', cut: 'Cut Away', hidden: 'Hidden' };
 export const treatmentLabel = mode => labels[mode] ?? mode;
-// Physical support concerns do not change the inferred layer type.
+// Physical support concerns do not change the inferred object type.
 export const isAutomaticSuggestion = suggestion => suggestion.confidence === 'high' || ['keep', 'cut'].includes(suggestion.mode) && suggestion.confidence === 'medium';
 export const suggestionDefaults = () => ({ areaSuggestions: null, areaOverrides: {} });
 
@@ -71,7 +71,7 @@ export function suggestAreas(artwork, settings) {
     if (r.members.some(c => !c.closed)) {
       confidence = 'high'; reason = 'Open paths need an Outline channel.';
     } else if (duplicate) {
-      mode = 'hidden'; confidence = 'high'; reason = `Equivalent duplicate boundary of Layer ${duplicate.drawingOrder + 1}.`;
+      mode = 'hidden'; confidence = 'high'; reason = `Equivalent duplicate boundary of Object ${duplicate.drawingOrder + 1}.`;
     } else if (stroked(r) || !r.fill) {
       confidence = 'high'; reason = 'Stroke-based detail is preserved as an Outline channel.';
     } else if (!opaque(r)) {
@@ -121,7 +121,7 @@ export function suggestAreas(artwork, settings) {
   suggestions.warnings = result.warnings;
   const cuts = result.paths.map(path => path.map(p => ({ X: Math.round(p.x * SCALE), Y: Math.round(p.y * SCALE) })));
   const erasedKeep = regions.some(r => !settings.areaOverrides?.[r.id] && proposed.materialTreatments[r.id] === 'keep' && area(polygons(r.paths, cuts, 'ctIntersection')) > 0.00001);
-  if (erasedKeep) suggestions.warnings.push('Proposed cuts erase retained details. Review the layer order and treatments.');
+  if (erasedKeep) suggestions.warnings.push('Proposed cuts erase retained details. Review the object order and treatments.');
   // Report support/detail concerns without replacing the inferred types with Outline.
   // Existing bridges participate in this check.
   if (erasedKeep || result.unsupported.length || result.narrowConnections || result.components.filter(c => c.sheetConnected).length > 1 || result.regionBridges.some(b => !b.valid) || result.warnings.some(w => w.includes('intersect another'))) {

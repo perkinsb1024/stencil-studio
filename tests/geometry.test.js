@@ -105,7 +105,7 @@ test('hiding a nested outline preserves custom tabs and restores identical geome
 test('hidden outlines keep warning numbers stable and suppress their own warnings', () => {
   const contours = [identifiedSquare, { ...square, id: 'outline-1' }, { ...square, id: 'outline-2' }];
   const result = generateStencil(contours, { ...options, tabLayouts: { 'outline-0': [], 'outline-2': [] }, hiddenContours: ['outline-0', 'outline-1'] });
-  assert.deepEqual(result.warnings, ['Layer 3 has no tabs; its inner piece may come loose.']);
+  assert.deepEqual(result.warnings, ['Object 3 has no tabs; its inner piece may come loose.']);
   assert.ok(result.bridges.every(b => b.contourId === 'outline-2'));
 });
 
@@ -317,7 +317,7 @@ test('regions can widen a channel and use true polygon edges rather than a bound
   assert.equal(insideCuts(result, { x: 20, y: 51.1 }), 0);
 });
 
-test('region scope applies to individual outlines before union, or to all layers', () => {
+test('region scope applies to individual outlines before union, or to all objects', () => {
   const other = { ...measureContour([{ x: 10, y: 70 }, { x: 110, y: 70 }], false), id: 'outline-1' };
   const settings = { ...noTabs, tabLayouts: { 'outline-0': [], 'outline-1': [] } };
   const shape = rect(30, 35, 70, 85);
@@ -489,7 +489,7 @@ test('rounded tab caps curve inward while preserving the gap and open endpoints'
   assert.match(exportSvg(rounded, 120, 20), /Z/);
 });
 
-test('rounded caps support seams, very short cuts and width regions', () => {
+test('rounded caps support seams, very short cuts and override regions', () => {
   for (const contour of [square, measureContour([{ x: 0, y: 0 }, { x: 0.4, y: 0 }], false)]) {
     const result = generateStencil([contour], { ...options, tabOffset: 50, roundedTabs: true });
     assert.ok(result.paths.length > 0);
@@ -502,4 +502,32 @@ test('rounded caps support seams, very short cuts and width regions', () => {
   assert.equal(insideCuts(rounded, { x: 57.9, y: 10 }), 1);
   assert.equal(insideCuts(rounded, { x: 57.9, y: 11.9 }), 0);
   assert.equal(insideCuts(rounded, { x: 60, y: 10 }), 0);
+});
+
+test('regional corner styles change only covered corners with constant or tapered widths', () => {
+  for (const width of [2, 1]) {
+    for (const roundedChannelCorners of [false, true]) {
+      const settings = { ...options, tabCount: 0, roundedChannelCorners,
+        regions: [{ ...region(rect(0, 0, 30, 30), width), roundedChannelCorners: !roundedChannelCorners }] };
+      const result = generateStencil([identifiedSquare], settings);
+      const radius = width / 2;
+      assert.equal(insideCuts(result, { x: 10 - radius * 0.9, y: 10 - radius * 0.9 }), roundedChannelCorners ? 1 : 0);
+      assert.equal(insideCuts(result, { x: 110.9, y: 9.1 }), roundedChannelCorners ? 0 : 1);
+      assert.equal(insideCuts(result, { x: 60, y: 60 }), 0);
+      assert.equal(result.paths.length, 2);
+    }
+  }
+});
+
+test('regional tab cap styles resolve independently at each end and preserve retaining gaps', () => {
+  const line = { ...measureContour([{ x: 10, y: 10 }, { x: 110, y: 10 }], false), id: 'outline-0' };
+  for (const roundedTabs of [false, true]) {
+    const result = generateStencil([line], { ...options, tabCount: 1, roundedTabs,
+      regions: [{ ...region(rect(54, 5, 59, 15), 2), roundedTabs: !roundedTabs }] });
+    assert.equal(insideCuts(result, { x: 57.9, y: 10.9 }), roundedTabs ? 1 : 0);
+    assert.equal(insideCuts(result, { x: 62.1, y: 10.9 }), roundedTabs ? 0 : 1);
+    for (const x of [58.1, 60, 61.9]) assert.equal(insideCuts(result, { x, y: 10 }), 0);
+    assert.equal(insideCuts(result, { x: 10.1, y: 10.9 }), 1);
+    assert.equal(insideCuts(result, { x: 109.9, y: 10.9 }), 1);
+  }
 });

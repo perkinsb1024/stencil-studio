@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { scaleRegions, validPolygon, containsPoint, channelWidthAt } from '../src/regions.js';
+import { scaleRegions, validPolygon, containsPoint, channelWidthAt, createChannelWidthProfile } from '../src/regions.js';
 const points = [{ x: 0.1, y: 0.2 }, { x: 0.4, y: 0.2 }, { x: 0.4, y: 0.5 }, { x: 0.1, y: 0.5 }];
 test('region vertices follow artwork resizing and padding while widths stay in millimeters', () => {
   const regions = [{ id: 'region-one', width: 0.8, taperLength: 12, contourId: null, points }];
@@ -42,4 +42,18 @@ test('each region uses its own taper length outside its boundary, respecting sco
   const overlap = { channelWidth: 8, regions: [square(20, 2, 4), square(20, 4, 12)] };
   assert.equal(channelWidthAt({ x: 20, y: 5 }, 'outline-0', overlap), 4);
   assert.equal(channelWidthAt({ x: 14, y: 5 }, 'outline-0', overlap), 6);
+});
+
+test('regional styles inherit independently and honor polygon boundaries, object scope and priority', () => {
+  const base = { points, width: 2, taperLength: 5, contourId: null };
+  const options = { channelWidth: 2, roundedTabs: false, roundedChannelCorners: true, regions: [
+    { ...base, roundedTabs: true, roundedChannelCorners: false },
+    { ...base, contourId: 'outline-0', roundedChannelCorners: true },
+  ] };
+  const profile = createChannelWidthProfile('outline-0', options);
+  assert.equal(profile.shapeAt({ x: 0.2, y: 0.3 }, 'roundedTabs'), true);
+  assert.equal(profile.shapeAt({ x: 0.2, y: 0.3 }, 'roundedChannelCorners'), true);
+  assert.equal(createChannelWidthProfile('outline-1', options).shapeAt({ x: 0.2, y: 0.3 }, 'roundedChannelCorners'), false);
+  assert.equal(profile.shapeAt({ x: 0.09, y: 0.3 }, 'roundedTabs'), false);
+  assert.equal(profile.shapeAt({ x: 0.1, y: 0.3 }, 'roundedTabs'), true);
 });

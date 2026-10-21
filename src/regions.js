@@ -59,6 +59,13 @@ export function createChannelWidthProfile(contourId, options) {
   });
   return {
     regions,
+    shapeAt(point, property) {
+      let value = property === 'roundedChannelCorners' ? options[property] !== false : !!options[property];
+      for (const region of regions) {
+        if (typeof region[property] === 'boolean' && containsPoint(region.points, point)) value = region[property];
+      }
+      return value;
+    },
     widthAt(point) {
       let width = options.channelWidth;
       for (const region of regions) {

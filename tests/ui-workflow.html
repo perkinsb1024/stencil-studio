@@ -42,13 +42,13 @@ await check('Upload stays a large drop target, with samples collapsed immediatel
   assert($('#upload').getBoundingClientRect().height >= 170 && $('#upload').textContent.includes('replace'));
   await click('[data-example="bloom"]');
 });
-await check('Step destinations are explicit and returning from Artwork starts with Layers', async () => {
+await check('Step destinations are explicit and returning from Artwork starts with Objects', async () => {
   await click('#step-next'); assert(!$('#outline-inspector').hidden);
   await click('#edit-tabs'); await click('#step-next');
   assert($('#step-back').textContent === 'Back to Tabs');
   await click('#step-back'); assert(!$('#tab-inspector').hidden);
   await click('#step-back'); assert(!$('#artwork-step').hidden);
-  assert($('#step-next').textContent === 'Continue to Layers');
+  assert($('#step-next').textContent === 'Continue to Objects');
   await click('#step-next'); assert(!$('#outline-inspector').hidden);
   await click('#edit-regions'); await click('[data-step="3"]'); await click('[data-step="2"]');
   assert(!$('#outline-inspector').hidden);
@@ -95,7 +95,7 @@ await check('Undo restores uncertainty; redo and reload preserve the review queu
   await click('#close-type-review'); await click('#apply-area-suggestions');
   assert(Object.keys(saved().document.areaDecisions).length === 2);
 });
-await check('Layer move actions preserve identity and commit one undo step', async () => {
+await check('Object move actions preserve identity and commit one undo step', async () => {
   const before = layerOrder(), count = saved().history.past.length;
   await click(`[data-order-id="${before[1]}"] [data-order-action="top"]`);
   assert(layerOrder()[0] === before[1]); assert(saved().history.past.length === count + 1);
@@ -103,8 +103,8 @@ await check('Layer move actions preserve identity and commit one undo step', asy
   await click('#undo'); assert(layerOrder().join() === before.join());
   await click('#redo'); assert(layerOrder()[0] === before[1]);
 });
-await check('Filtering disables reorder and Show All Layers restores it', async () => {
-  $('#layer-search').value = 'Layer 1'; $('#layer-search').dispatchEvent(new w.Event('input'));
+await check('Filtering disables reorder and Show All Objects restores it', async () => {
+  $('#layer-search').value = 'Object 1'; $('#layer-search').dispatchEvent(new w.Event('input'));
   assert($('#outline-list .drag-handle').disabled && !$('#layer-reorder-hint').hidden);
   await click('#clear-layer-filter'); assert(!$('#outline-list .drag-handle').disabled);
 });

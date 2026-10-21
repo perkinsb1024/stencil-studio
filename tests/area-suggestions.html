@@ -77,7 +77,7 @@ await check('Manual choices survive safe reapplication; reapply and use-all-outl
 await check('Compound cuts apply immediately, support warnings remain separate, and manual edits undo', async () => {
   await upload(wrap('<path fill-rule="evenodd" d="M10 10H90V90H10Z M30 30H70V70H30Z"/>'));
   assert($('#treatment-outline-0').value === 'cut', 'Donut default: ' + $('#treatment-outline-0').value);
-  assert($('#review-areas').hidden, 'Support issues were treated as uncertain layer types');
+  assert($('#review-areas').hidden, 'Support issues were treated as uncertain object types');
   await click('[data-step="3"]'); assert($('#geometry-issue-list').textContent.includes('unsupported'));
   await click('#edit-outlines');
   await change('#treatment-outline-0', 'outline');

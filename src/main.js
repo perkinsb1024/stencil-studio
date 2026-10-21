@@ -1,3 +1,5 @@
+import { configureLengthControls, formatLength, gridMarkup, setLengthValue, toMillimeters } from './units.js';
+import { drawMarginSelection, clearMarginSelection } from './selection-overlay.js';
 import { createBusyTask } from './busy-task.js';
 import { updateWorkspaceUI, updatePanHint } from './workspace-ui.js';
 import { pendingTypeReviews, typeReviewIds, decideLayerType } from './type-review.js';
@@ -22,6 +24,9 @@ const icons = {
   check: '<path d="m5 12 4 4L19 6"/>',
   chevron: '<path d="m9 5 7 7-7 7"/>',
   reset: '<path d="M3 10a9 9 0 1 1 2 8M3 4v6h6"/>',
+  undo: '<g transform="translate(24 0) scale(-1 1)" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></g>',
+  redo: '<g stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></g>',
+  lock: '<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   minus: '<path d="M5 12h14"/>',
   fit: '<path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/>',
@@ -34,7 +39,7 @@ const icons = {
 };
 const icon = (name, cls = '') => `<svg class="icon ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] || ''}</svg>`;
 const defaults = { artworkWidth: 150, channelWidth: 1.5, tabWidth: 3, tabCount: 4, tabOffset: 0, margin: 8, roundedTabs: false, roundedChannelCorners: true };
-const state = { ...defaults, artwork: null, source: null, example: '', name: 'Bloom.svg', view: 'material', showTabs: true, showOriginal: false, zoom: 1, panX: 0, panY: 0, sourceWarnings: [], result: null, scaled: null, tabLayouts: {}, hiddenContours: [], cutawayContours: [], regions: [], editingRegions: false, selectedRegion: null, drawingRegion: false, regionDraft: [], regionWidth: 0.8, regionTaperLength: 5, regionScope: 'outline-0', editingOutlines: false, selectedOutlines: [], showHiddenOutlines: true, editing: false, adding: false, selectedContour: null, selectedTab: null, selectedTabs: [], selectCurrentOutlineOnly: true };
+const state = { ...defaults, units: 'mm', showGrid: false, gridSpacing: 25.4, artwork: null, source: null, example: '', name: 'Bloom.svg', view: 'material', showTabs: true, showOriginal: false, zoom: 1, panX: 0, panY: 0, sourceWarnings: [], result: null, scaled: null, tabLayouts: {}, hiddenContours: [], cutawayContours: [], regions: [], editingRegions: false, selectedRegion: null, drawingRegion: false, regionDraft: [], regionWidth: 0.8, regionTaperLength: 5, regionRoundedTabs: 'inherit', regionRoundedChannelCorners: 'inherit', regionScope: 'outline-0', editingOutlines: false, selectedOutlines: [], showHiddenOutlines: true, editing: false, adding: false, selectedContour: null, selectedTab: null, selectedTabs: [], selectCurrentOutlineOnly: true };
 const $ = s => document.querySelector(s);
 const htmlText = text => String(text).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const materialDefaults = () => ({ ...suggestionDefaults(), areaDecisions: {}, areaSuggestionBasis: null, materialVersion: 1, materialTreatments: {}, materialOrder: [], regionBridges: [], bridgeExclusions: [], bridgeWidth: 3, minimumMaterialWidth: 0.5, bridgeReinforcement: false, bridgeMatchFeatures: true, bridgeSnapLines: true, bridgeSnapAngles: true });
@@ -43,6 +48,7 @@ const outlineThumbnails = new WeakMap();
 const outlineBounds = new WeakMap();
 
 document.querySelector('#app').innerHTML = workspaceView(icon, bridgePanel);
+configureLengthControls(state);
 // Keep document sizing above the workspace and editing tools over the canvas.
 const inspectorHeader = document.createElement('div');
 inspectorHeader.id = 'shape-header';
@@ -57,15 +63,16 @@ $('#tabs-available').prepend($('#channel-settings'));
 let noticeTimer;
 function notify(message, kind = 'success') {
   const el = $('#notice');
-  clearTimeout(noticeTimer); el.textContent = message; el.className = `notice ${kind}`; el.hidden = false;
+  clearTimeout(noticeTimer); el.textContent = message; el.title = message; el.className = `notice ${kind}`; el.hidden = false;
   if (kind === 'success') noticeTimer = setTimeout(() => { el.hidden = true; }, 6000);
 }
 
 let geometryKey = null, geometryArtwork = null, detectAreas = false, completedWorkspace = null, detectionBefore = null;
+let snapPreviewView = null;
 const busy = createBusyTask({
   root: $('#app'), overlay: $('#preview-busy'), stage: $('#canvas-viewport'),
-  onCancel() { rollbackGeneration(); notify('Calculation cancelled. Previous stencil restored.'); },
-  onError(message) { rollbackGeneration(); notify(message, 'error'); },
+  onCancel() { snapPreviewView = null; rollbackGeneration(); notify('Calculation cancelled. Previous stencil restored.'); },
+  onError(message) { snapPreviewView = null; rollbackGeneration(); notify(message, 'error'); },
 });
 function geometrySettings() {
   // Bridge generation preferences do not change the existing stencil geometry.
@@ -115,7 +122,7 @@ function render() {
   } else if (geometryChanged) {
     const artwork = state.artwork, detecting = detectAreas;
     busy.run('stencil', { artwork, settings, detectAreas: detecting },
-      detecting ? 'Detecting layer types…' : settings.analyzeMaterial ? 'Analyzing stencil material…' : 'Generating tabs and channels…',
+      detecting ? 'Detecting object types…' : settings.analyzeMaterial ? 'Analyzing stencil material…' : 'Generating tabs and channels…',
       ({ scaled, stencil, suggestions, ...treatments }) => {
         state.scaled = scaled; state.result = stencil;
         if (suggestions) {
@@ -148,26 +155,49 @@ function render() {
   fitSheet();
   const cuts = state.result.paths.map(p => pathData(p)).join('');
   svg.innerHTML = `<rect width="${width}" height="${height}" fill="#fffef9"/><path class="cut-shape" d="${cuts}" fill="${state.view === 'material' ? '#502c6c' : 'none'}" stroke="${state.view === 'cut' ? '#502c6c' : 'none'}" stroke-width="0.14" fill-rule="evenodd"/>`;
+  if (state.showGrid) svg.innerHTML += gridMarkup(width, height, state.gridSpacing);
   if (state.showOriginal) svg.innerHTML += `<g class="original-outlines" fill="none" stroke="#6f8bca" stroke-width="0.18" stroke-dasharray="1 0.7" pointer-events="none">${visible.map(c => `<path d="${pathData(c.points, c.closed)}"/>`).join('')}</g>`;
   if (state.editing) svg.innerHTML += `<g class="outline-hit-targets" fill="none" stroke="transparent" stroke-width="18" vector-effect="non-scaling-stroke">${tabContours.map(c => `<path data-outline="${c.id}" d="${pathData(c.points, c.closed)}" vector-effect="non-scaling-stroke"/>`).join('')}</g>`;
-  if (state.editing && state.selectedContour) {
+  if (state.editing && state.selectedContour && (state.view === 'material' || state.showTabs)) {
     const selected = contours.find(c => c.id === state.selectedContour);
     if (selected) svg.innerHTML += `<path d="${pathData(selected.points, selected.closed)}" fill="none" stroke="#258477" stroke-width="1" stroke-dasharray="3 4" vector-effect="non-scaling-stroke" pointer-events="none" opacity="0.6"/>`;
   }
-  if ((state.showTabs || state.editing) && !state.editingOutlines) svg.innerHTML += renderTabMarkers();
+  if ((state.view === 'material' || state.showTabs) && !state.editingOutlines) svg.innerHTML += renderTabMarkers();
   if (state.editingOutlines) svg.innerHTML += renderOutlineTargets();
   if (state.editingRegions) svg.innerHTML += regionEditor.overlay();
-  if (state.editingBridges || state.showBridges || state.workflowStep === 3) svg.innerHTML += bridgeEditor.overlay();
+  if (state.view === 'material' || state.editingBridges || state.showBridges || state.workflowStep === 3) svg.innerHTML += bridgeEditor.overlay();
   svg.classList.toggle('editing-tabs', state.editing);
   svg.classList.toggle('editing-outlines', state.editingOutlines);
   svg.classList.toggle('adding-tab', state.adding);
-  $('#dimension-width').textContent = `${width.toFixed(1)} mm`;
-  $('#dimension-height').textContent = `${height.toFixed(1)} mm`;
+  $('#dimension-width').textContent = formatLength(width, state);
+  $('#dimension-height').textContent = formatLength(height, state);
   const support = $('#material-status');
   support.hidden = true;
   $('#offset-value').textContent = `${state.tabOffset}%`;
   updateWorkspaceUI(state);
+  const snappedView = snapPreviewView;
+  snapPreviewView = null;
+  if (snappedView) {
+    const { panX, panY, zoom } = snappedView;
+    Object.assign(state, { panX, panY, zoom });
+  }
   fitSheet();
+  if (snappedView) {
+    const { bridgeId, scrollLeft, scrollTop } = snappedView;
+    const viewport = $('#canvas-viewport');
+    viewport.scrollLeft = scrollLeft; viewport.scrollTop = scrollTop;
+    const polygon = state.result.regionBridges.find(bridge => bridge.id === bridgeId)?.polygon;
+    if (polygon?.length) {
+      const bounds = viewport.getBoundingClientRect();
+      const low = svgPoint({ clientX: bounds.left, clientY: bounds.top });
+      const high = svgPoint({ clientX: bounds.right, clientY: bounds.bottom });
+      const xs = polygon.map(p => p.x), ys = polygon.map(p => p.y);
+      const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+      if (maxX < low.x || minX > high.x || maxY < low.y || minY > high.y) {
+        fitSheet({ x: (minX + maxX) / 2, y: (minY + maxY) / 2 });
+      }
+    }
+  }
   updateHistoryButtons();
   if (!geometryChanged) queueMicrotask(rememberCompletedWorkspace);
 }
@@ -187,7 +217,7 @@ function uncertainAreas() { return pendingTypeReviews(state); }
 function layerName(id) {
   const regions = state.artwork.sourceRegions ?? [];
   const source = regions.find(region => region.id === id);
-  return source?.source?.id || source?.source?.groups?.at(-1)?.id || `Layer ${[...new Set(state.artwork.contours.map(c => c.regionId))].indexOf(id) + 1}`;
+  return source?.source?.id || source?.source?.groups?.at(-1)?.id || `Object ${[...new Set(state.artwork.contours.map(c => c.regionId))].indexOf(id) + 1}`;
 }
 function reviewUncertainArea() {
   activateTool('layers');
@@ -221,7 +251,7 @@ function updateTypeReview() {
   const pending = uncertainAreas(), all = typeReviewIds(state);
   $('#review-count').textContent = state.areaSuggestions ? pending.length ? `${pending.length} Need Review` : 'No Types Need Review' : 'Not Checked';
   $('#review-areas').hidden = !!state.areaSuggestions && !pending.length;
-  $('#review-areas').textContent = state.areaSuggestions ? 'Review Layer Types' : 'Detect Layer Types';
+  $('#review-areas').textContent = state.areaSuggestions ? 'Review Object Types' : 'Detect Object Types';
   $('#type-review').hidden = !state.reviewingTypes;
   if (!state.reviewingTypes) return;
   if (!state.reviewRegion && pending.length) { state.reviewRegion = pending[0]; focusReviewRegion(); }
@@ -229,15 +259,15 @@ function updateTypeReview() {
   const id = state.reviewRegion, suggestion = state.areaSuggestions?.byRegion[id];
   const members = state.artwork.contours.filter(c => c.regionId === id);
   const hasLayer = Boolean(suggestion && members.length);
-  $('#review-layer-name').textContent = hasLayer ? layerName(id) : 'Layer Types Reviewed';
+  $('#review-layer-name').textContent = hasLayer ? layerName(id) : 'Object Types Reviewed';
   $('#review-thumbnail').innerHTML = hasLayer ? members.map(outlineThumbnail).join('') : '';
   $('#review-current').textContent = hasLayer ? members.every(c => state.hiddenContours.includes(c.id)) ? `Hidden (${treatmentLabel(materialMode(members[0], state))})` : treatmentLabel(materialMode(members[0], state)) : 'All Choices Saved';
   $('#review-suggested').textContent = hasLayer ? treatmentLabel(suggestion.mode) : 'No Remaining Choices';
-  $('#area-review-hint').textContent = hasLayer ? suggestion.reason : 'You can still change any layer type or continue to review the stencil.';
+  $('#area-review-hint').textContent = hasLayer ? suggestion.reason : 'You can still change any object type or continue to review the stencil.';
   const progress = `${pending.length} Remaining`;
   if ($('#review-progress').textContent !== progress) $('#review-progress').textContent = progress;
   for (const selector of ['#accept-area-suggestion', '#keep-area-type', '#review-treatment']) $(selector).disabled = !hasLayer;
-  $('#accept-area-suggestion').textContent = suggestion?.mode === 'hidden' ? 'Hide Layer' : 'Use Suggested Type';
+  $('#accept-area-suggestion').textContent = suggestion?.mode === 'hidden' ? 'Hide Object' : 'Use Suggested Type';
   $('#accept-area-suggestion').setAttribute('aria-label', hasLayer ? `Use ${treatmentLabel(suggestion.mode)} for ${layerName(id)}` : 'Use Suggested Type');
   $('#keep-area-type').textContent = suggestion?.mode === 'hidden' ? 'Keep Visible' : 'Keep Current Type';
   $('.review-types').hidden = !hasLayer;
@@ -256,7 +286,7 @@ function renderOutlineTargets() {
   return `<g class="outline-visibility-targets">${[...state.scaled.contours].sort((a, b) => state.materialOrder.indexOf(a.regionId) - state.materialOrder.indexOf(b.regionId)).map(c => {
     const hidden = state.hiddenContours.includes(c.id), selected = state.selectedOutlines.includes(c.id);
     if (hidden && !state.showHiddenOutlines) return '';
-    return `<g data-visibility-outline="${c.id}" class="visibility-outline ${hidden ? 'is-hidden' : ''} ${selected ? 'selected' : ''}" tabindex="0" role="button" aria-label="Layer ${outlineNumber(c.id)}, ${hidden ? 'hidden' : 'visible'}" aria-pressed="${selected}">
+    return `<g data-visibility-outline="${c.id}" class="visibility-outline ${hidden ? 'is-hidden' : ''} ${selected ? 'selected' : ''}" tabindex="0" role="button" aria-label="Object ${outlineNumber(c.id)}, ${hidden ? 'hidden' : 'visible'}" aria-pressed="${selected}">
       <path class="outline-guide" d="${pathData(c.points, c.closed)}" fill="none" vector-effect="non-scaling-stroke" pointer-events="none"/>
       <path d="${pathData(c.points, c.closed)}" fill="${c.closed ? 'transparent' : 'none'}" stroke="transparent" stroke-width="18" vector-effect="non-scaling-stroke" pointer-events="${c.closed ? 'all' : 'stroke'}"/>
     </g>`;
@@ -331,7 +361,7 @@ function updateOutlineSelectionControls() {
   $('#layer-selection-controls').hidden = selectedRegions.size < 2;
   const selectedMembers = state.artwork.contours.filter(c => selectedRegions.has(c.regionId));
   const selectedModes = new Set(selectedMembers.map(c => materialMode(c, state)));
-  $('#selected-layer-count').textContent = `${selectedRegions.size} ${selectedRegions.size === 1 ? 'Layer' : 'Layers'} Selected`;
+  $('#selected-layer-count').textContent = `${selectedRegions.size} ${selectedRegions.size === 1 ? 'Object' : 'Objects'} Selected`;
   $('#selected-layer-treatment').value = selectedModes.size === 1 ? [...selectedModes][0] : '';
   for (const option of $('#selected-layer-treatment').options) if (option.value) option.disabled = option.value !== 'outline' && selectedMembers.some(c => !c.closed);
 }
@@ -360,7 +390,7 @@ function updateOutlineSelection() {
   else { updateOutlineSelectionControls(); updateOutlineSelectionHighlights(); }
 }
 function updateOutlineEditor() {
-  $('#edit-outlines').textContent = 'Layers';
+  $('#edit-outlines').textContent = 'Objects';
   $('#edit-outlines').setAttribute('aria-pressed', state.editingOutlines);
   $('#outline-inspector').hidden = !state.editingOutlines;
   const groups = [...new Set([...state.materialOrder, ...state.artwork.contours.map(c => c.regionId)])].filter(id => state.artwork.contours.some(c => c.regionId === id)).reverse();
@@ -391,18 +421,47 @@ function updateOutlineEditor() {
       const children = compound ? `<details class="compound-children" data-group="${regionId}" ${openGroups.has(regionId) ? 'open' : ''}><summary>${members.length} Contours</summary>${members.map((contour, index) => `<div class="contour-child"><button id="select-${contour.id}" data-select-outline="${contour.id}" aria-pressed="${selected.includes(contour.id)}">Contour ${index + 1}</button><label class="check-label"><input id="visible-${contour.id}" type="checkbox" data-visible-outline="${contour.id}" aria-label="Show ${label} Contour ${index + 1}" ${state.hiddenContours.includes(contour.id) ? '' : 'checked'} />Visible</label></div>`).join('')}</details>` : '';
       return `<section class="layer-card ${compound ? 'compound-layer' : ''} ${active ? 'selected' : ''} ${hidden ? 'is-hidden' : ''}" role="listitem" data-order-id="${regionId}" data-order-label="${label}">
         <div class="layer-main">${controls}<button ${compound ? '' : `id="select-${c.id}"`} class="outline-select" data-select-outline="${c.id}" aria-label="Select ${label}" aria-pressed="${active}">${outlineThumbnail(compound ? members : c)}<span>${label}<small class="${pending ? 'needs-review' : ''}">${status}</small></span></button><label class="visibility-toggle" title="${hidden ? 'Show' : 'Hide'} ${label}"><input ${compound ? '' : `id="visible-${c.id}"`} type="checkbox" data-visible-layer="${regionId}" ${compound ? '' : `data-visible-outline="${c.id}"`} aria-label="${hidden ? 'Show' : 'Hide'} ${label}" ${hidden ? '' : 'checked'} /><span aria-hidden="true">${icon('eye')}</span></label></div>
-        <label class="layer-treatment" for="treatment-${c.id}"><span>Layer Type</span><select id="treatment-${c.id}" data-treatment-outline="${c.id}" aria-label="${label} Type">${[['outline', 'Outline'], ['keep', 'Keep'], ['cut', 'Cut Away']].map(([value, text]) => `<option value="${value}" ${mode === value ? 'selected' : ''} ${value !== 'outline' && members.some(m => !m.closed) ? 'disabled' : ''}>${text}</option>`).join('')}</select></label>
-        ${children}<details class="layer-explanation"><summary>Type Details</summary><div class="area-suggestion"><strong>${status}</strong>${suggestion ? `<span>Suggested Type: ${treatmentLabel(suggestion.mode)}</span><span>${htmlText(suggestion.reason)}</span><span>Confidence: ${suggestion.confidence}</span>` : '<span>Choose a layer type to control its treatment.</span>'}</div></details>
+        <label class="layer-treatment" for="treatment-${c.id}"><span>Object Type</span><select id="treatment-${c.id}" data-treatment-outline="${c.id}" aria-label="${label} Type">${[['outline', 'Outline'], ['keep', 'Keep'], ['cut', 'Cut Away']].map(([value, text]) => `<option value="${value}" ${mode === value ? 'selected' : ''} ${value !== 'outline' && members.some(m => !m.closed) ? 'disabled' : ''}>${text}</option>`).join('')}</select></label>
+        ${children}<details class="layer-explanation"><summary>Type Details</summary><div class="area-suggestion"><strong>${status}</strong>${suggestion ? `<span>Suggested Type: ${treatmentLabel(suggestion.mode)}</span><span>${htmlText(suggestion.reason)}</span><span>Confidence: ${suggestion.confidence}</span>` : '<span>Choose an object type to control its treatment.</span>'}</div></details>
       </section>`;
-    }).join('') || '<p class="empty-state">No layers match this filter.</p>';
+    }).join('') || '<p class="empty-state">No objects match this filter.</p>';
     list.artwork = state.artwork; list.visibilityKey = key; list.scrollTop = scroll;
     if (focus) document.getElementById(focus)?.focus({ preventScroll: true });
   }
   updateOutlineSelectionHighlights();
 }
 
-function fitSheet() {
+function zoomSelectionCenter() {
+  if (!state.scaled) return null;
+  let points = [];
+  if (state.activeTool === 'tabs') {
+    points = selectedBridges().map(tab => tab.point);
+  } else if (state.activeTool === 'bridges') {
+    points = (state.result?.regionBridges ?? []).filter(bridge => state.selectedRegionBridges.includes(bridge.id)).flatMap(bridge => bridge.polygon);
+  } else if (state.activeTool === 'regions') {
+    points = state.scaled.regions?.find(region => region.id === state.selectedRegion)?.points ?? [];
+  } else {
+    points = state.scaled.contours.filter(contour => state.selectedOutlines.includes(contour.id)).flatMap(contour => contour.points);
+  }
+  if (!points.length) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const point of points) {
+    minX = Math.min(minX, point.x); maxX = Math.max(maxX, point.x);
+    minY = Math.min(minY, point.y); maxY = Math.max(maxY, point.y);
+  }
+  return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+}
+
+function zoomPreview(delta) {
+  state.zoom = Math.max(0.25, Math.min(3, state.zoom + delta));
+  fitSheet(zoomSelectionCenter());
+}
+
+function fitSheet(center = null) {
   if (!state.scaled) return;
+  // Intermediate renders during snapping must not resize or animate the
+  // sheet. Restore the camera once the final stencil is ready instead.
+  if (snapPreviewView) return;
   const area = $('#canvas-viewport');
   const ratio = state.scaled.width / state.scaled.height;
   // Canvas dimensions are independent of editing controls; fit to the space
@@ -411,11 +470,18 @@ function fitSheet() {
   const wrap = $('#sheet-wrap');
   wrap.style.width = `${height * ratio}px`;
   wrap.style.height = `${height}px`;
-  const maxX = height * ratio * Math.max(0, state.zoom - 1) / 2;
-  const maxY = height * Math.max(0, state.zoom - 1) / 2;
+  if (center) {
+    const pixelsPerUnit = height / state.scaled.height;
+    state.panX = (state.scaled.width / 2 - center.x) * pixelsPerUnit * state.zoom;
+    state.panY = (state.scaled.height / 2 - center.y) * pixelsPerUnit * state.zoom;
+  }
+  // Let any point on the sheet reach the viewport center, including edge selections.
+  const maxX = height * ratio * state.zoom / 2;
+  const maxY = height * state.zoom / 2;
   state.panX = Math.max(-maxX, Math.min(maxX, state.panX));
   state.panY = Math.max(-maxY, Math.min(maxY, state.panY));
   wrap.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.zoom})`;
+  resizePreviewHandles();
   $('#zoom-label').textContent = `${Math.round(state.zoom * 100)}%`;
   previewPan.refresh();
   queueWorkspaceSave();
@@ -424,6 +490,7 @@ function fitSheet() {
 function selectedContour() { return state.scaled?.contours.find(c => c.id === state.selectedContour); }
 function matchesTab(bridge, ref) { return bridge.contourId === ref.contourId && bridge.id === ref.id; }
 function selectTab(contourId, id) {
+  if (id) state.showTabs = true;
   state.selectedContour = contourId; state.selectedTab = id;
   state.selectedTabs = id ? [{ contourId, id }] : [];
 }
@@ -434,6 +501,7 @@ function selectionPositions() {
   return selectedBridges().map(b => ({ contourId: b.contourId, id: b.id, position: b.position, closed: state.scaled.contours.find(c => c.id === b.contourId).closed }));
 }
 function applyPositionDelta(tabs, delta) {
+  if (tabs.length) state.showTabs = true;
   // A shared bound keeps open-outline groups from collapsing at endpoints.
   const open = tabs.filter(t => !t.closed);
   if (open.length) delta = Math.max(-Math.min(...open.map(t => t.position)), Math.min(1 - Math.max(...open.map(t => t.position)), delta));
@@ -451,24 +519,38 @@ function customizeSelected() {
   if (!contour) return [];
   const wasAutomatic = !Object.hasOwn(state.tabLayouts, contour.id);
   const tabs = customizeContour(state.tabLayouts, contour, state);
-  if (wasAutomatic) notify('This layer now uses custom tab placement. Default width still applies.');
+  if (wasAutomatic) notify('This object now uses custom tab placement. Default width still applies.');
   return tabs;
 }
 function screenUnit() {
-  return state.scaled.width / ($('#preview-svg').getBoundingClientRect().width || 350);
+  // Use the target scale so the CSS zoom transition cannot affect handle sizing.
+  return state.scaled.width / (($('#sheet-wrap').clientWidth || 350) * state.zoom);
+}
+function resizePreviewHandles() {
+  const unit = screenUnit();
+  $('#preview-svg').querySelector('.material-bridge-overlays')?.style.setProperty('--bridge-handle-unit', `${unit}px`);
+  for (const handle of $('#preview-svg').querySelectorAll('[data-screen-radius]')) {
+    const radius = Math.min(Number(handle.dataset.screenRadius) * unit, Number(handle.dataset.maxRadius ?? Infinity));
+    if (handle.tagName === 'rect') {
+      const x = Number(handle.getAttribute('x')) + Number(handle.getAttribute('width')) / 2;
+      const y = Number(handle.getAttribute('y')) + Number(handle.getAttribute('height')) / 2;
+      handle.setAttribute('x', x - radius); handle.setAttribute('y', y - radius);
+      handle.setAttribute('width', radius * 2); handle.setAttribute('height', radius * 2);
+    } else handle.setAttribute('r', radius);
+  }
 }
 function renderTabMarkers() {
   const radius = screenUnit() * 3.5;
   return `<g class="tab-markers">${state.result.bridges.map(b => {
     const selected = state.editing && state.selectedTabs.some(ref => matchesTab(b, ref));
     const color = b.custom ? '#258477' : '#c3963e';
-    const label = `${b.custom ? 'Custom' : 'Automatic'} tab, layer ${state.scaled.contours.findIndex(c => c.id === b.contourId) + 1}, ${b.width.toFixed(1)} mm${b.widthOverride == null ? ', default width' : ', width override'}`;
+    const label = `${b.custom ? 'Custom' : 'Automatic'} tab, object ${state.scaled.contours.findIndex(c => c.id === b.contourId) + 1}, ${formatLength(b.width, state)}${b.widthOverride == null ? ', default width' : ', width override'}`;
     return `<g data-tab="${b.id}" data-outline="${b.contourId}" class="tab-marker ${selected ? 'selected' : ''}" ${state.editing ? `tabindex="0" role="button" aria-label="${label}" aria-pressed="${selected}"` : ''}>
       <title>${label}</title>
       <path d="${b.segments.map(p => pathData(p, false)).join('')}" fill="none" stroke="${color}" stroke-width="${b.channelWidth + 0.65}" opacity="0.65"/>
-      ${b.custom ? `<circle cx="${b.point.x}" cy="${b.point.y}" r="${radius}"` : `<rect x="${b.point.x - radius}" y="${b.point.y - radius}" width="${radius * 2}" height="${radius * 2}"`} fill="${color}" stroke="#fffef9" stroke-width="1" vector-effect="non-scaling-stroke"/>
-      ${selected ? `<circle cx="${b.point.x}" cy="${b.point.y}" r="${radius + screenUnit() * 4}" fill="none" stroke="#ff2da6" stroke-width="3" vector-effect="non-scaling-stroke"/>` : ''}
-      ${state.editing ? `<circle cx="${b.point.x}" cy="${b.point.y}" r="${screenUnit() * 12}" fill="transparent"/>` : ''}
+      ${b.custom ? `<circle cx="${b.point.x}" cy="${b.point.y}" r="${radius}" data-screen-radius="3.5"` : `<rect x="${b.point.x - radius}" y="${b.point.y - radius}" width="${radius * 2}" height="${radius * 2}" data-screen-radius="3.5"`} fill="${color}" stroke="#fffef9" stroke-width="1" vector-effect="non-scaling-stroke"/>
+      ${selected ? `<circle cx="${b.point.x}" cy="${b.point.y}" r="${radius + screenUnit() * 4}" data-screen-radius="7.5" fill="none" stroke="#ff2da6" stroke-width="3" vector-effect="non-scaling-stroke"/>` : ''}
+      ${state.editing ? `<circle cx="${b.point.x}" cy="${b.point.y}" r="${screenUnit() * 12}" data-screen-radius="12" fill="transparent"/>` : ''}
     </g>`;
   }).join('')}</g>`;
 }
@@ -476,24 +558,24 @@ function updateTabEditor() {
   const contours = channelContours();
   const automatic = contours.filter(c => !Object.hasOwn(state.tabLayouts, c.id)).length;
   const custom = contours.length - automatic;
-  $('#automatic-scope').textContent = `Placement affects ${automatic} automatic outline${automatic === 1 ? '' : 's'}. ${custom} custom. Each contour in a compound layer gets its own count.`;
+  $('#automatic-scope').textContent = `Placement affects ${automatic} automatic outline${automatic === 1 ? '' : 's'}. ${custom} custom. Each contour in a compound object gets its own count.`;
   for (const id of ['tabCount', 'tabOffset', 'tabs-minus', 'tabs-plus']) $(`#${id}`).disabled = automatic === 0;
   $('#reset-all-tabs').disabled = Object.keys(state.tabLayouts).length === 0;
   $('#edit-tabs').textContent = 'Tabs';
   $('#edit-tabs').setAttribute('aria-pressed', state.editing);
   $('#edit-tabs').setAttribute('aria-expanded', state.editing);
   $('#edit-tabs').disabled = !toolAvailable('tabs');
-  $('#edit-tabs').title = $('#edit-tabs').disabled ? 'Tabs require a visible Outline layer.' : '';
+  $('#edit-tabs').title = $('#edit-tabs').disabled ? 'Tabs require a visible Outline object.' : '';
   $('#tabs-unavailable').hidden = contours.length > 0;
   $('#tabs-available').hidden = contours.length === 0;
   $('#add-tab').hidden = !state.editing;
   $('#add-tab').setAttribute('aria-pressed', state.adding);
   $('#add-tab').textContent = state.adding ? 'Cancel Placement' : 'Add Tabs';
   $('#edit-hint').hidden = !state.editing;
-  $('#edit-hint').textContent = state.adding ? 'Click layers to keep adding tabs at the previewed positions. Choose Cancel Placement or press Escape to finish.' : 'Drag tabs to move them. Drag empty space to select a group; Shift adds to the selection.';
+  $('#edit-hint').textContent = state.adding ? 'Click objects to keep adding tabs at the previewed positions. Choose Cancel Placement or press Escape to finish.' : 'Drag tabs to move them. Drag empty space to select a group; Shift adds to the selection.';
   $('#tab-inspector').hidden = !state.editing;
-  $('#show-tabs').disabled = false;
-  $('#show-tabs').checked = state.showTabs;
+  $('#show-tabs').disabled = state.view === 'material';
+  $('#show-tabs').checked = state.view === 'material' || state.showTabs;
   $('#outline-picker').innerHTML = contours.map(c => `<option value="${c.id}">${htmlText(layerName(c.regionId))}${state.artwork.contours.filter(member => member.regionId === c.regionId).length > 1 ? `, Contour ${state.artwork.contours.filter(member => member.regionId === c.regionId).indexOf(c) + 1}` : ''} (${Object.hasOwn(state.tabLayouts, c.id) ? 'Custom' : 'Automatic'})</option>`).join('');
   const contour = selectedContour();
   if (!contour) return;
@@ -501,10 +583,10 @@ function updateTabEditor() {
   const number = outlineNumber(contour.id);
   $('#outline-mode').textContent = isCustom ? 'Custom' : 'Automatic';
   $('#outline-mode').classList.toggle('custom', isCustom);
-  $('#outline-mode-hint').textContent = isCustom ? 'Custom placement is preserved. Widths follow the default unless overridden.' : 'Editing a tab makes this layer custom and preserves its placement.';
+  $('#outline-mode-hint').textContent = isCustom ? 'Custom placement is preserved. Widths follow the default unless overridden.' : 'Editing a tab makes this object custom and preserves its placement.';
   $('#outline-picker').value = contour.id;
   const tabs = state.result.bridges.filter(b => b.contourId === contour.id);
-  $('#tab-picker').innerHTML = '<option value="">Select a tab…</option>' + tabs.map((b, i) => `<option value="${b.id}">Tab ${i + 1} (${b.width.toFixed(1)} mm, ${b.widthOverride == null ? 'Default' : 'Override'})</option>`).join('');
+  $('#tab-picker').innerHTML = '<option value="">Select a tab…</option>' + tabs.map((b, i) => `<option value="${b.id}">Tab ${i + 1} (${formatLength(b.width, state)}, ${b.widthOverride == null ? 'Default' : 'Override'})</option>`).join('');
   $('#tab-picker').value = state.selectedTab ?? '';
   const bridge = selectedBridge();
   const selection = selectedBridges();
@@ -517,15 +599,15 @@ function updateTabEditor() {
   $('#remove-tab').disabled = !bridge;
   $('#inherit-tab-width').disabled = !bridge || bridge.widthOverride == null;
   $('#tab-inspector').classList.toggle('has-selection', !!bridge);
-  $('#selected-outline-label').textContent = multiple ? `${selection.length} Tabs Selected` : bridge ? `Layer ${number}, Tab ${tabs.indexOf(bridge) + 1}` : `Layer ${number}`;
+  $('#selected-outline-label').textContent = multiple ? `${selection.length} Tabs Selected` : bridge ? `Object ${number}, Tab ${tabs.indexOf(bridge) + 1}` : `Object ${number}`;
   if (bridge) {
-    $('#selected-tab-width').value = selection.some(tab => tab.requestedWidth !== bridge.requestedWidth) ? '' : bridge.requestedWidth;
+    setLengthValue($('#selected-tab-width'), selection.some(tab => tab.requestedWidth !== bridge.requestedWidth) ? '' : bridge.requestedWidth, state);
     $('#selected-tab-width').placeholder = 'Mixed';
-    $('#selected-tab-width-range').value = bridge.requestedWidth;
+    setLengthValue($('#selected-tab-width-range'), bridge.requestedWidth, state);
     $('#selected-tab-position').value = Number((bridge.position * 100).toFixed(2));
     $('#selected-tab-position-range').value = $('#selected-tab-position').value;
     updateRangePaint();
-    $('#tab-width-status').textContent = `${bridge.widthOverride == null ? 'Uses default width.' : 'Individual width override.'}${bridge.width < bridge.requestedWidth - 1e-7 ? ` Effective width: ${bridge.width.toFixed(2)} mm to fit this layer.` : ''}`;
+    $('#tab-width-status').textContent = `${bridge.widthOverride == null ? 'Uses default width.' : 'Individual width override.'}${bridge.width < bridge.requestedWidth - 1e-7 ? ` Effective width: ${formatLength(bridge.width, state)} to fit this object.` : ''}`;
     if (multiple) $('#tab-width-status').textContent = selection.every(b => b.requestedWidth === bridge.requestedWidth) ? 'Width applies to all selected tabs.' : 'Mixed widths. Set a width to apply it to all selected tabs.';
     $('#inherit-tab-width').disabled = selection.every(b => b.widthOverride == null);
   }
@@ -536,13 +618,14 @@ function addTab(contourId, position) {
   mutate(() => {
     const tabs = customizeSelected();
     const id = `tab-${crypto.randomUUID()}`;
-    tabs.push({ id, position, widthOverride: null }); selectTab(contourId, id);
+    state.showTabs = true; tabs.push({ id, position, widthOverride: null }); selectTab(contourId, id);
   });
 }
 function removeSelectedTab() {
   const selection = selectedBridges();
   if (!selection.length) return;
   mutate(() => {
+    state.showTabs = true;
     for (const ref of selection) {
       const contour = state.scaled.contours.find(c => c.id === ref.contourId);
       const tabs = customizeContour(state.tabLayouts, contour, state);
@@ -558,6 +641,7 @@ function updateSelectedTab(property, value, live = false) {
   if (property === 'position' && !positionGesture) positionGesture = { tabs: selectionPositions(), anchor: bridge.position };
   const gesture = positionGesture;
   const apply = () => {
+    state.showTabs = true;
     if (property === 'position') applyPositionDelta(gesture.tabs, value - gesture.anchor);
     else for (const ref of selectedBridges()) {
       const contour = state.scaled.contours.find(c => c.id === ref.contourId);
@@ -568,7 +652,22 @@ function updateSelectedTab(property, value, live = false) {
   else { mutate(apply); positionGesture = null; }
 }
 const regionEditor = createRegionEditor({ state, render, mutate, snapshot, restore, record: before => history.record(before), beginEdit: () => { if (!pendingSettings) pendingSettings = snapshot(); }, commit: commitSettings, save: queueWorkspaceSave, notify, svgPoint, screenUnit });
-const bridgeEditor = createBridgeEditor({ state, render, mutate, snapshot, restore, record: before => history.record(before), commit: commitSettings, save: queueWorkspaceSave, notify, svgPoint, screenUnit, runTask: (task, payload, label, complete) => busy.run(task, payload, label, complete) });
+const bridgeEditor = createBridgeEditor({ state, render, mutate, snapshot, restore, record: before => history.record(before), commit: commitSettings, save: queueWorkspaceSave, notify, svgPoint, screenUnit,
+  runTask(task, payload, label, complete) {
+    const viewport = $('#canvas-viewport');
+    const view = task === 'snap' ? {
+      panX: state.panX, panY: state.panY, zoom: state.zoom,
+      scrollLeft: viewport.scrollLeft, scrollTop: viewport.scrollTop, bridgeId: payload.bridge.id,
+    } : null;
+    snapPreviewView = view;
+    busy.run(task, payload, label, result => {
+      // Keep this through the follow-up stencil calculation; its final render
+      // restores the camera and only reveals a completely off-screen bridge.
+      complete(result);
+      if (!busy.active) snapPreviewView = null;
+    });
+  },
+});
 const simplifyEditor = createSimplifyEditor({
   state, commit: commitWorkspaceEdits, download: downloadFile,
   apply(source) {
@@ -603,9 +702,9 @@ function toolAvailable(tool) {
 function syncEditingFlags() {
   if (!toolAvailable(state.activeTool)) { state.activeTool = 'layers'; state.adding = false; }
   $('#edit-regions').disabled = !toolAvailable('regions');
-  $('#edit-regions').title = $('#edit-regions').disabled ? 'Width Regions require a visible Outline layer.' : '';
+  $('#edit-regions').title = $('#edit-regions').disabled ? 'Override Regions require a visible Outline object.' : '';
   $('#edit-bridges').disabled = !toolAvailable('bridges');
-  $('#edit-bridges').title = $('#edit-bridges').disabled ? 'Bridges require a visible Outline or Cut Away layer.' : '';
+  $('#edit-bridges').title = $('#edit-bridges').disabled ? 'Bridges require a visible Outline or Cut Away object.' : '';
   for (const [tool, flag] of Object.entries(toolModes)) state[flag] = state.workflowStep === 2 && state.activeTool === tool;
 }
 function closeActionPanels() {
@@ -653,6 +752,20 @@ document.addEventListener('click', event => {
   if (tool) activateTool(tool.dataset.openTool);
   if (event.target.closest('[data-review-types]')) reviewUncertainArea();
 });
+function positionOverlayMenu() {
+  const panel = $('#preview-options');
+  if (!panel.matches(':popover-open')) return;
+  const anchor = $('#overlay-toggle').getBoundingClientRect();
+  panel.style.left = 'auto';
+  panel.style.right = `${Math.max(16, innerWidth - anchor.right)}px`;
+  panel.style.top = `${anchor.bottom + 6}px`;
+  panel.style.bottom = 'auto';
+  panel.style.maxHeight = `${Math.max(0, innerHeight - anchor.bottom - 22)}px`;
+  panel.style.overflowY = 'auto';
+}
+$('#preview-options').addEventListener('toggle', positionOverlayMenu);
+window.addEventListener('resize', positionOverlayMenu);
+window.addEventListener('scroll', positionOverlayMenu, true);
 $('#review-areas').addEventListener('click', reviewUncertainArea);
 $('#close-type-review').addEventListener('click', () => { state.reviewingTypes = false; render(); $('#review-areas').hidden ? $('#outline-inspector h2').focus() : $('#review-areas').focus(); });
 $('#next-area').addEventListener('click', () => advanceTypeReview(1));
@@ -696,14 +809,14 @@ $('#keep-only-outlines').addEventListener('click', () => mutate(() => {
   state.hiddenContours = state.artwork.contours.filter(c => !state.selectedOutlines.includes(c.id)).map(c => c.id);
   markAreaOverrides(state.artwork.contours.map(c => c.id));
 }));
-$('#add-tab').addEventListener('click', () => { state.adding = !state.adding; render(); });
+$('#add-tab').addEventListener('click', () => { state.adding = !state.adding; if (state.adding) state.showTabs = true; render(); });
 document.querySelectorAll('input[name="rectangle-selection-scope"]').forEach(input => {
   input.addEventListener('change', e => { state.selectCurrentOutlineOnly = e.target.value === 'selected'; updateTabEditor(); queueWorkspaceSave(); });
 });
 $('#outline-picker').addEventListener('change', e => { commitSettings(); selectTab(e.target.value, null); render(); });
 $('#tab-picker').addEventListener('change', e => { commitSettings(); selectTab(state.selectedContour, e.target.value || null); render(); });
 $('#selected-tab-width').addEventListener('change', e => {
-  const value = Number(e.target.value);
+  const value = toMillimeters(e.target.value, state);
   if (e.target.value === '' || !Number.isFinite(value)) return updateTabEditor();
   updateSelectedTab('widthOverride', Math.max(0.5, Math.min(15, value)));
 });
@@ -717,14 +830,14 @@ for (const [id, property, scale] of [
   ['selected-tab-position-range', 'position', 100],
 ]) {
   const slider = $(`#${id}`);
-  slider.addEventListener('input', e => updateSelectedTab(property, Number(e.target.value) / scale, true));
+  slider.addEventListener('input', e => updateSelectedTab(property, (property === 'widthOverride' ? toMillimeters(e.target.value, state) : Number(e.target.value) / scale), true));
   slider.addEventListener('change', commitSettings);
   slider.addEventListener('blur', commitSettings);
 }
 $('#inherit-tab-width').addEventListener('click', () => updateSelectedTab('widthOverride', null));
 $('#remove-tab').addEventListener('click', removeSelectedTab);
-$('#reset-outline').addEventListener('click', () => mutate(() => { delete state.tabLayouts[state.selectedContour]; state.selectedTab = null; }));
-$('#reset-all-tabs').addEventListener('click', () => mutate(() => { state.tabLayouts = {}; state.selectedTab = null; }));
+$('#reset-outline').addEventListener('click', () => mutate(() => { delete state.tabLayouts[state.selectedContour]; state.selectedTab = null; state.showTabs = true; }));
+$('#reset-all-tabs').addEventListener('click', () => mutate(() => { state.tabLayouts = {}; state.selectedTab = null; state.showTabs = true; }));
 function svgPoint(event) {
   const matrix = $('#preview-svg').getScreenCTM();
   return matrix ? new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse()) : null;
@@ -742,16 +855,19 @@ function nearestOutline(event) {
 function clearGhost() { $('#tab-ghost')?.remove(); }
 function showGhost(event) {
   clearGhost();
+  if (state.view === 'cut' && !state.showTabs) return;
   const nearest = nearestOutline(event);
   if (!nearest) return;
   const ghost = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
   ghost.id = 'tab-ghost'; ghost.setAttribute('cx', nearest.point.x); ghost.setAttribute('cy', nearest.point.y);
+  ghost.dataset.screenRadius = '6';
   ghost.setAttribute('r', screenUnit() * 6); ghost.setAttribute('fill', '#258477'); ghost.setAttribute('fill-opacity', '0.35');
   ghost.setAttribute('stroke', '#258477'); ghost.setAttribute('stroke-width', '2'); ghost.setAttribute('vector-effect', 'non-scaling-stroke'); ghost.setAttribute('pointer-events', 'none');
   $('#preview-svg').append(ghost);
 }
 let drag = null, suppressOutlineClick = false;
 const preview = $('#preview-svg');
+const selectionViewport = $('#canvas-viewport');
 const previewPan = createPreviewPan({
   viewport: $('#canvas-viewport'), button: $('#pan-preview'),
   enabled: () => state.zoom > 1,
@@ -763,6 +879,7 @@ const previewPan = createPreviewPan({
   modeChanged: mode => updatePanHint(state, mode),
 });
 function drawSelectionBox(start, end) {
+  drawMarginSelection(preview, start, end);
   let rect = $('#tab-selection-box');
   if (!rect) {
     rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -802,7 +919,7 @@ function updateLayerSelectionDrag() {
   }
   drawSelectionBox(drag.start, point);
 }
-preview.addEventListener('pointerdown', e => {
+selectionViewport.addEventListener('pointerdown', e => {
   if (e.button !== 0 || drag) return;
   if (state.editingOutlines) {
     suppressOutlineClick = false;
@@ -817,6 +934,7 @@ preview.addEventListener('pointerdown', e => {
   }
   if (!state.editing) return;
   if (state.adding) {
+    if (!preview.contains(e.target)) return;
     const nearest = nearestOutline(e);
     if (nearest) { e.preventDefault(); addTab(nearest.contour.id, nearest.position); showGhost(e); }
     return;
@@ -831,7 +949,7 @@ preview.addEventListener('pointerdown', e => {
     if (!state.selectedTabs.some(t => t.id === ref.id && t.contourId === ref.contourId)) {
       selectTab(ref.contourId, ref.id);
       if (e.shiftKey) state.selectedTabs = [...previous, ref];
-    } else { state.selectedContour = ref.contourId; state.selectedTab = ref.id; }
+    } else { state.showTabs = true; state.selectedContour = ref.contourId; state.selectedTab = ref.id; }
   } else selectTab(outline?.dataset.outline ?? state.selectedContour, null);
   drag = { kind: marker ? 'tabs' : 'box', pointerId: e.pointerId, x: e.clientX, y: e.clientY, start: svgPoint(e), before: snapshot(), moved: false,
     tabs: selectionPositions(), anchor: selectedBridge()?.position, contourId: state.selectedContour, selectionContour, previous: e.shiftKey ? previous.filter(ref => marker || !selectionContour || ref.contourId === selectionContour) : [] };
@@ -851,8 +969,8 @@ preview.addEventListener('click', e => {
   if (!marker) return;
   selectTab(marker.dataset.outline, marker.dataset.tab); render();
 });
-preview.addEventListener('pointermove', e => {
-  if (state.adding) return showGhost(e);
+selectionViewport.addEventListener('pointermove', e => {
+  if (state.adding) return preview.contains(e.target) ? showGhost(e) : clearGhost();
   if (!drag || drag.pointerId !== e.pointerId) return;
   if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 3) return;
   if (drag.kind === 'layers') {
@@ -868,6 +986,7 @@ preview.addEventListener('pointermove', e => {
     const inside = state.result.bridges.filter(b => (!drag.selectionContour || b.contourId === drag.selectionContour) && b.point.x >= Math.min(start.x, point.x) && b.point.x <= Math.max(start.x, point.x) && b.point.y >= Math.min(start.y, point.y) && b.point.y <= Math.max(start.y, point.y));
     state.selectedTabs = [...drag.previous];
     for (const b of inside) if (!state.selectedTabs.some(ref => matchesTab(b, ref))) state.selectedTabs.push({ contourId: b.contourId, id: b.id });
+    if (state.selectedTabs.length) state.showTabs = true;
     const anchor = state.selectedTabs[0];
     state.selectedTab = anchor?.id ?? null;
     if (anchor) state.selectedContour = anchor.contourId;
@@ -892,6 +1011,7 @@ function finishDrag(event, cancelled = false) {
   }
   const finished = drag; drag = null;
   $('#tab-selection-box')?.remove();
+  clearMarginSelection(preview);
   if (finished.kind === 'layers') {
     suppressOutlineClick = true;
     if (cancelled) { state.selectedOutlines = finished.previousSelection; updateOutlineSelection(); }
@@ -902,9 +1022,9 @@ function finishDrag(event, cancelled = false) {
   if (preview.hasPointerCapture(event.pointerId)) preview.releasePointerCapture(event.pointerId);
   if (!cancelled && finished.moved && finished.kind === 'tabs') render();
 }
-preview.addEventListener('pointerup', e => finishDrag(e));
-preview.addEventListener('pointercancel', e => finishDrag(e, true));
-preview.addEventListener('lostpointercapture', e => finishDrag(e, true));
+selectionViewport.addEventListener('pointerup', e => finishDrag(e));
+selectionViewport.addEventListener('pointercancel', e => finishDrag(e, true));
+selectionViewport.addEventListener('lostpointercapture', e => finishDrag(e, true));
 preview.addEventListener('pointerleave', clearGhost);
 $('#preview-svg').addEventListener('keydown', e => {
   if (state.editingOutlines) {
@@ -925,7 +1045,7 @@ $('#preview-svg').addEventListener('keydown', e => {
   if (['Enter', ' ', 'Delete', 'Backspace', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
     e.preventDefault();
     if (!state.selectedTabs.some(ref => ref.contourId === marker.dataset.outline && ref.id === marker.dataset.tab)) selectTab(marker.dataset.outline, marker.dataset.tab);
-    else { state.selectedContour = marker.dataset.outline; state.selectedTab = marker.dataset.tab; }
+    else { state.showTabs = true; state.selectedContour = marker.dataset.outline; state.selectedTab = marker.dataset.tab; }
     if (e.key === 'Delete' || e.key === 'Backspace') removeSelectedTab();
     else if (e.key.startsWith('Arrow')) {
       const bridge = selectedBridge();
@@ -1066,9 +1186,13 @@ function syncSettingInputs() {
   for (const key of Object.keys(defaults)) {
     if ($(`#${key}`)) {
       if ($(`#${key}`).type === 'checkbox') $(`#${key}`).checked = state[key];
+      else if (['artworkWidth', 'channelWidth', 'tabWidth', 'margin'].includes(key)) setLengthValue($(`#${key}`), state[key], state);
       else $(`#${key}`).value = state[key];
     }
-    if ($(`#${key}-range`)) $(`#${key}-range`).value = state[key];
+    if ($(`#${key}-range`)) {
+      if (['artworkWidth', 'channelWidth', 'tabWidth', 'margin'].includes(key)) setLengthValue($(`#${key}-range`), state[key], state);
+      else $(`#${key}-range`).value = state[key];
+    }
   }
   document.querySelectorAll('[data-shape-setting]').forEach(button => {
     const selected = state[button.dataset.shapeSetting] === (button.dataset.rounded === 'true');
@@ -1079,14 +1203,25 @@ function syncSettingInputs() {
 }
 function syncControl(key, value, live = false) {
   const input = $(`#${key}`);
-  if (value === '' || !Number.isFinite(Number(value))) { input.value = state[key]; return; }
+  if (value === '' || !Number.isFinite(Number(value))) { syncSettingInputs(); return; }
   let number = Math.max(Number(input.min), Math.min(Number(input.max), Number(value)));
+  if (['artworkWidth', 'channelWidth', 'tabWidth', 'margin'].includes(key)) number = toMillimeters(number, state);
   if (key === 'tabCount') number = Math.round(number);
+  if (['tabCount', 'tabOffset', 'tabWidth'].includes(key)) state.showTabs = true;
   if (!pendingSettings) pendingSettings = snapshot();
   state[key] = number;
   syncSettingInputs(); scheduleRender();
   if (!live) commitSettings();
 }
+$('#artworkHeight').addEventListener('change', e => {
+  if (!state.artwork) return;
+  const { bounds } = state.artwork;
+  const ratio = (bounds.maxY - bounds.minY) / (bounds.maxX - bounds.minX);
+  const height = e.target.value;
+  syncControl('artworkWidth', height === '' ? '' : Number(height) / ratio);
+  // Also restore the derived value when an empty or invalid edit is rejected.
+  setLengthValue(e.target, state.artworkWidth * ratio, state);
+});
 for (const key of ['artworkWidth', 'channelWidth', 'tabWidth', 'tabCount', 'tabOffset']) {
   $(`#${key}`).addEventListener('change', e => syncControl(key, e.target.value));
   const slider = $(`#${key}-range`) || (key === 'tabOffset' ? $(`#${key}`) : null);
@@ -1098,24 +1233,49 @@ document.querySelectorAll('[data-shape-setting]').forEach(button => {
   button.addEventListener('click', () => {
     const key = button.dataset.shapeSetting, rounded = button.dataset.rounded === 'true';
     if (state[key] === rounded) return;
-    mutate(() => { state[key] = rounded; syncSettingInputs(); });
+    mutate(() => { if (key === 'roundedTabs') state.showTabs = true; state[key] = rounded; syncSettingInputs(); });
   });
 });
 $('#tabs-minus').addEventListener('click', () => syncControl('tabCount', state.tabCount - 1));
 $('#tabs-plus').addEventListener('click', () => syncControl('tabCount', state.tabCount + 1));
-$('#reset').addEventListener('click', () => { mutate(() => { Object.assign(state, defaults); state.tabLayouts = {}; state.selectedTab = null; syncSettingInputs(); }); notify('Stencil settings and tabs reset. Undo is available.'); });
+$('#reset').addEventListener('click', () => { mutate(() => { Object.assign(state, defaults); state.tabLayouts = {}; state.selectedTab = null; state.showTabs = true; syncSettingInputs(); }); notify('Stencil settings and tabs reset. Undo is available.'); });
 $('#undo').addEventListener('click', () => { bridgeEditor.finishGesture(); regionEditor.finishGesture(); commitSettings(); history.undo(); });
 $('#redo').addEventListener('click', () => { bridgeEditor.finishGesture(); regionEditor.finishGesture(); history.redo(); });
 $('#show-tabs').addEventListener('change', e => { state.showTabs = e.target.checked; render(); });
 $('#show-bridges').addEventListener('change', e => { state.showBridges = e.target.checked; render(); });
 $('#show-original').addEventListener('change', e => { state.showOriginal = e.target.checked; render(); });
+function syncPreviewPreferences() {
+  configureLengthControls(state);
+  document.querySelectorAll('[data-units]').forEach(button => {
+    const active = button.dataset.units === state.units;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+  $('#show-grid').checked = state.showGrid;
+  $('#grid-spacing').value = state.gridSpacing / 25.4;
+  $('#grid-spacing-value').textContent = formatLength(state.gridSpacing, state);
+  $('#grid-spacing').setAttribute('aria-valuetext', formatLength(state.gridSpacing, state));
+  updateRangePaint();
+}
+document.querySelectorAll('[data-units]').forEach(button => button.addEventListener('click', () => {
+  commitWorkspaceEdits();
+  state.units = button.dataset.units;
+  syncPreviewPreferences(); syncSettingInputs(); render(); queueWorkspaceSave();
+}));
+$('#show-grid').addEventListener('change', e => {
+  state.showGrid = e.target.checked; render(); queueWorkspaceSave();
+});
+$('#grid-spacing').addEventListener('input', e => {
+  state.gridSpacing = Number(e.target.value) * 25.4;
+  syncPreviewPreferences(); scheduleRender(); queueWorkspaceSave();
+});
 for (const mode of ['material', 'cut']) $(`#${mode}-view`).addEventListener('click', () => {
   state.view = mode;
   for (const v of ['material', 'cut']) { $(`#${v}-view`).classList.toggle('active', v === mode); $(`#${v}-view`).setAttribute('aria-pressed', v === mode); }
   render();
 });
-$('#zoom-in').addEventListener('click', () => { state.zoom = Math.min(3, state.zoom + 0.25); fitSheet(); });
-$('#zoom-out').addEventListener('click', () => { state.zoom = Math.max(0.25, state.zoom - 0.25); fitSheet(); });
+$('#zoom-in').addEventListener('click', () => zoomPreview(0.25));
+$('#zoom-out').addEventListener('click', () => zoomPreview(-0.25));
 $('#zoom-fit').addEventListener('click', () => { state.zoom = 1; state.panX = state.panY = 0; previewPan.reset(); fitSheet(); });
 function downloadFile(data, type, filename) {
   const url = URL.createObjectURL(new Blob([data], { type }));
@@ -1127,7 +1287,7 @@ $('#download').addEventListener('click', () => {
   if (!state.result?.paths.length) return;
   const data = exportSvg(state.result, state.scaled.width, state.scaled.height, state.name.replace(/\.svg$/i, '') + ' stencil');
   downloadFile(data, 'image/svg+xml', state.name.replace(/\.svg$/i, '') + '-stencil.svg');
-  notify(`Stencil downloaded — ${state.scaled.width.toFixed(1)} × ${state.scaled.height.toFixed(1)} mm.`);
+  notify(`Stencil downloaded — ${formatLength(state.scaled.width, state)} × ${formatLength(state.scaled.height, state)}.`);
 });
 $('#export-session').addEventListener('click', () => {
   if (!state.source) return;
@@ -1157,7 +1317,7 @@ function queueWorkspaceSave() {
   workspaceSaveTimer = setTimeout(saveWorkspace, 150);
 }
 function captureWorkspace() {
-  const ui = Object.fromEntries(['view', 'showTabs', 'showOriginal', 'zoom', 'panX', 'panY', 'editing', 'adding', 'selectedContour', 'selectedTab', 'selectedTabs', 'selectCurrentOutlineOnly', 'editingOutlines', 'selectedOutlines', 'showHiddenOutlines', 'editingRegions', 'selectedRegion', 'drawingRegion', 'regionDraft', 'regionWidth', 'regionTaperLength', 'regionScope'].map(key => [key, state[key]]));
+  const ui = Object.fromEntries(['units', 'showGrid', 'gridSpacing', 'view', 'showTabs', 'showOriginal', 'zoom', 'panX', 'panY', 'editing', 'adding', 'selectedContour', 'selectedTab', 'selectedTabs', 'selectCurrentOutlineOnly', 'editingOutlines', 'selectedOutlines', 'showHiddenOutlines', 'editingRegions', 'selectedRegion', 'drawingRegion', 'regionDraft', 'regionWidth', 'regionTaperLength', 'regionRoundedTabs', 'regionRoundedChannelCorners', 'regionScope'].map(key => [key, state[key]]));
   const viewport = $('#canvas-viewport');
   Object.assign(ui, { workflowStep: state.workflowStep, activeTool: state.activeTool, showBridges: state.showBridges, reviewingTypes: state.reviewingTypes, reviewRegion: state.reviewRegion, sourceChosen: state.sourceChosen, editingBridges: state.editingBridges, selectedRegionBridge: state.selectedRegionBridge, selectedRegionBridges: state.selectedRegionBridges });
   return {
@@ -1229,7 +1389,7 @@ function restoreWorkspace() {
       $(`#${view}-view`).setAttribute('aria-pressed', state.view === view);
     }
     document.querySelectorAll('[data-example]').forEach(button => button.classList.toggle('active', button.dataset.example === state.example));
-    syncSettingInputs();
+    syncPreviewPreferences(); syncSettingInputs();
     // Older snapshots share the workspace source. Bind it now so Undo can
     // cross a later artwork replacement without losing that original SVG.
     history.hydrate(Object.fromEntries(['past', 'future'].map(key => [key, saved.history[key].map(entry => ({ source: saved.source, name: saved.name, example: saved.example ?? '', ...entry }))])));

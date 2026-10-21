@@ -47,7 +47,7 @@ await check('Compound treatments update together and undo restores the previous 
   await click('#undo');
   assert($('#treatment-outline-3').value === 'keep');
 });
-await check('Layer ordering changes actual cut geometry and can be undone', async () => {
+await check('Object ordering changes actual cut geometry and can be undone', async () => {
   const before = $('.cut-shape').getAttribute('d');
   await click('[data-order-id="shape-0"] [data-order-action="up"]');
   assert($('.cut-shape').getAttribute('d') !== before);
@@ -82,6 +82,35 @@ await check('Width edits become custom, regeneration preserves them, and undo/re
   await click('#generate-bridges'); assert(JSON.stringify(flush().document.regionBridges[0]) === JSON.stringify(custom));
   await click('#undo'); assert(flush().document.regionBridges[0].width === initialBridgeWidth);
   await click('#redo'); assert(flush().document.regionBridges[0].width === 4.2);
+});
+await check('Bridge swatches match and wide bridge edges and handle halos receive pointer hits', async () => {
+  await change('#bridge-picker', flush().document.regionBridges[0].id);
+  const group = $('.region-bridge.selected');
+  const color = w.getComputedStyle(group.querySelector('.bridge-highlight')).stroke;
+  assert(w.getComputedStyle($('.legend-custom-bridge')).borderColor === color, 'Custom bridge swatch differs');
+  await change('#selected-bridge-width', '15');
+  try {
+    const body = $('.region-bridge.selected .bridge-hit'), svg = $('#preview-svg');
+    const bounds = body.getBBox(), matrix = svg.getScreenCTM();
+    let checked = 0;
+    for (let x = 1; x < 20; x++) for (let y = 1; y < 20; y++) {
+      const point = new w.DOMPoint(bounds.x + bounds.width * x / 20, bounds.y + bounds.height * y / 20);
+      if (!body.isPointInFill(point)) continue;
+      const screen = point.matrixTransform(matrix), target = d.elementFromPoint(screen.x, screen.y);
+      assert(target?.closest('[data-material-bridge]'), 'Bridge interior is not draggable');
+      assert(w.getComputedStyle(target).cursor === (target.matches('.bridge-handle-hit') ? 'grab' : 'move'), 'Bridge interior shows the wrong cursor');
+      checked++;
+    }
+    assert(checked > 0, 'No bridge interior points checked');
+    const hit = $('[data-bridge-end="a"]'), visible = $('[data-bridge-handle-visual="a"]');
+    const center = new w.DOMPoint(Number(hit.getAttribute('cx')), Number(hit.getAttribute('cy'))).matrixTransform(matrix);
+    const radius = Number(hit.getAttribute('r')) * Math.hypot(matrix.a, matrix.b);
+    assert(radius >= 8.5 && radius <= 9.5, 'Handle target does not stay 18px across');
+    assert(Number(hit.getAttribute('r')) > Number(visible.getAttribute('r')) * 2, 'Handle halo is not larger than its dot');
+    for (const [dx, dy] of [[6, 0], [-6, 0], [0, 6], [0, -6]]) {
+      assert(d.elementFromPoint(center.x + dx, center.y + dy)?.matches('.bridge-handle-hit'), 'Handle halo is clipped or does not receive hits');
+    }
+  } finally { await click('#undo'); }
 });
 await check('Session export includes regions and bridges; stencil export contains only final cuts', async () => {
   const blobs = [], originalURL = w.URL.createObjectURL, originalClick = w.HTMLAnchorElement.prototype.click;
@@ -281,6 +310,40 @@ await check('Alt bypasses line snapping and the disabled preference survives rel
   assert(flush().document.bridgeSnapLines === false);
   await load('/?workspace=material-editing-tests&live-reload=off');
   assert(!$('#bridge-snap-lines').checked && flush().document.bridgeSnapLines === false);
+});
+await check('Snap button reaches edges beyond the drag snap range', async () => {
+  await change('#bridge-picker', flush().document.regionBridges[0].id);
+  await click('#remove-bridge');
+  const scale = $('#preview-svg').getScreenCTM().a;
+  const x = 65.75 + 16 / scale;
+  await click('#add-bridge');
+  bridgePointer('pointerdown', { x, y: 83 }); await tick();
+  bridgePointer('pointerdown', { x, y: 3 }); await tick();
+  const before = flush().document.regionBridges[0];
+  await click('#snap-bridge');
+  const after = flush().document.regionBridges[0];
+  assert(Math.abs(after.a.x * 150 + 8 - 65.75) < 0.001, 'Button did not reach the edge 16 pixels away');
+  assert(before.width === after.width, 'Edge snapping changed the bridge width');
+});
+await check('Snap button keeps the sheet stationary throughout both worker calculations', async () => {
+  await change('#bridge-picker', flush().document.regionBridges[0].id);
+  for (let i = 0; i < 8; i++) await click('#zoom-in');
+  await new Promise(resolve => setTimeout(resolve, 160));
+  const svg = $('#preview-svg'), viewport = $('#canvas-viewport');
+  const before = svg.getBoundingClientRect();
+  let shift = 0, shiftedView;
+  const sample = () => {
+    const rect = svg.getBoundingClientRect();
+    const movement = Math.max(Math.abs(rect.x - before.x), Math.abs(rect.y - before.y), Math.abs(rect.width - before.width));
+    if (movement > shift) { shift = movement; shiftedView = { before: before.toJSON(), after: rect.toJSON(), scroll: [viewport.scrollLeft, viewport.scrollTop], transform: $('#sheet-wrap').style.transform }; }
+  };
+  const timer = setInterval(sample, 1);
+  const observer = new w.MutationObserver(sample);
+  observer.observe($('#sheet-wrap'), { attributes: true, childList: true, subtree: true });
+  try { await click('#snap-bridge'); await new Promise(resolve => setTimeout(resolve, 160)); sample(); }
+  finally { clearInterval(timer); observer.disconnect(); }
+  assert(shift < 0.1, `Sheet shifted during snapping by ${shift}px: ${JSON.stringify(shiftedView)}`);
+  assert(w.getComputedStyle(viewport).overflowAnchor === 'none', 'Browser scroll anchoring remains enabled');
 });
 document.querySelector('#summary').textContent = `${document.querySelectorAll('#results li:not(.fail)').length} passed, ${document.querySelectorAll('#results .fail').length} failed`;
 document.title = document.querySelector('.fail') ? 'FAIL — Material checks' : 'PASS — Material checks';

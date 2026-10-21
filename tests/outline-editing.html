@@ -81,7 +81,7 @@ await check('Rectangle selection batches pointer moves and preserves geometry an
     pointer('pointermove', bounds.right - 2, bounds.bottom - 2); paint();
     assert($('#tab-selection-box') === rectangle, 'Selection rectangle was replaced');
     assert($('.cut-shape') === cut && $(outline(0)) === target, 'Canvas geometry was replaced');
-    assert($('.layer-card') === card, 'Layer sidebar was rebuilt');
+    assert($('.layer-card') === card, 'Object sidebar was rebuilt');
     // Releasing before the next frame must commit the final pointer position.
     pointer('pointermove', bounds.right - 1, bounds.bottom - 1);
     pointer('pointerup', bounds.left + 8, bounds.top + 8);
@@ -100,7 +100,7 @@ await check('Rectangle selection batches pointer moves and preserves geometry an
     w.requestAnimationFrame = request; w.cancelAnimationFrame = cancel;
   }
 });
-await check('Rectangle selection changes several layer types with a single undo', async () => {
+await check('Rectangle selection changes several object types with a single undo', async () => {
   const svg = $('#preview-svg'), bounds = svg.getBoundingClientRect();
   const pointer = (type, x, y, target = svg, extra = {}) => target.dispatchEvent(new w.PointerEvent(type, { bubbles: true, pointerId: 42, button: 0, clientX: x, clientY: y, ...extra }));
   pointer('pointerdown', bounds.left + 1, bounds.top + 1);
@@ -181,7 +181,7 @@ await check('Tab mode excludes hidden outlines and contains its hint in the insp
   assert($('#edit-hint').closest('#tab-inspector'));
   assert($('#edit-hint').textContent.includes('Drag tabs to move them'));
   assert($('#outline-picker').options.length === 1 && $('#outline-picker').value === 'outline-1');
-  assert($('#outline-picker').textContent.includes('Layer 2'), 'Outline numbering changed');
+  assert($('#outline-picker').textContent.includes('Object 2'), 'Outline numbering changed');
   assert(markers().length === 4 && markers().every(m => m.dataset.outline === 'outline-1'));
   caretPointsTo('#tab-inspector', '#edit-tabs');
   await click('#add-tab');
@@ -259,7 +259,7 @@ await check('Compound transformed paths and open outlines remain independently h
   assert(selected().length === 1 && $(outline(0)).classList.contains('selected') && $(outline(1)).classList.contains('selected'), 'Enclosed child did not select its whole source layer');
   const details = $('.compound-children'); details.open = true;
   await click('#select-outline-1');
-  assert($('.compound-children') === details && details.open, 'Selection replaced the expanded compound layer');
+  assert($('.compound-children') === details && details.open, 'Selection replaced the expanded compound object');
   assert($('#select-outline-1').getAttribute('aria-pressed') === 'true' && $('#select-outline-0').getAttribute('aria-pressed') === 'false', 'Compound child selection did not synchronize');
   const before = [$('#dimension-width').textContent, $('#dimension-height').textContent];
   await click('#visible-outline-1'); await click('#visible-outline-2');

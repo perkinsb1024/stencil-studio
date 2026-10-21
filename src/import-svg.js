@@ -14,7 +14,7 @@ export function importSvg(source) {
     if (!doc.querySelector('path, rect, circle, ellipse, line, polyline, polygon, use')) throw new Error('This SVG contains live text. Convert text to paths in your drawing app, then upload it again.');
     warnings.push('Live text was skipped. Convert text to paths first if you want to cut the lettering.');
   }
-  if (doc.querySelector('image')) warnings.push('Embedded images were skipped. Only vector layers can become cut paths.');
+  if (doc.querySelector('image')) warnings.push('Embedded images were skipped. Only vector objects can become cut paths.');
   if (doc.querySelector('clipPath, mask')) throw new Error('This SVG uses clipping or masks. Flatten these to paths in your drawing app before importing.');
   for (const el of [...doc.querySelectorAll('*')]) {
     if (!allowed.has(el.localName)) { el.remove(); continue; }
@@ -73,7 +73,7 @@ export function importSvg(source) {
   }
   collect(root);
   root.remove();
-  if (!contours.length) throw new Error('No vector layers found. Upload an SVG containing paths or shapes.');
+  if (!contours.length) throw new Error('No vector objects found. Upload an SVG containing paths or shapes.');
   if (contours.length > 500) throw new Error('This SVG has more than 500 contours. Simplify it or split it into smaller files.');
   const all = contours.flatMap(c => c.points);
   let bounds = all.reduce((b, p) => ({ minX: Math.min(b.minX, p.x), minY: Math.min(b.minY, p.y), maxX: Math.max(b.maxX, p.x), maxY: Math.max(b.maxY, p.y) }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });

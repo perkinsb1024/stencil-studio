@@ -57,7 +57,7 @@ await check('Worker startup errors restore the previous stencil and unlock contr
   assert($('#notice').textContent.includes('Simulated worker failure'));
   assert(cuts() === path && $('#tabCount').value === '4' && !$('#upload').disabled);
 });
-await check('Layer detection and material analysis can be cancelled with Escape', async () => {
+await check('Object detection and material analysis can be cancelled with Escape', async () => {
   await click('#edit-outlines'); const path = cuts();
   $('#apply-area-suggestions').click(); locked('#cancel-generation', '#preview-busy');
   d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await ready();

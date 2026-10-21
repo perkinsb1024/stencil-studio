@@ -83,7 +83,8 @@ export function channelPaths(points, closed, profile, caps = {}, roundedCorners 
     sampled = [first, ...sampled.filter((_, i) => cumulative[i] > startDepth + 1e-9 && cumulative[i] < length - endDepth - 1e-9), last];
   }
   const [minWidth, maxWidth] = sampled.reduce(([min, max], p) => [Math.min(min, p.width), Math.max(max, p.width)], [Infinity, -Infinity]);
-  if (!rounded && maxWidth - minWidth < 1e-7) {
+  const regionalCorners = profile.regions.some(region => typeof region.roundedChannelCorners === 'boolean');
+  if (!rounded && !regionalCorners && maxWidth - minWidth < 1e-7) {
     const offset = new ClipperLib.ClipperOffset(2, SCALE * 0.015);
     offset.AddPath((closed ? points.slice(0, -1) : points).map(p => ({ X: Math.round(p.x * SCALE), Y: Math.round(p.y * SCALE) })), roundedCorners ? ClipperLib.JoinType.jtRound : ClipperLib.JoinType.jtMiter, closed ? ClipperLib.EndType.etClosedLine : ClipperLib.EndType.etOpenButt);
     const solution = new ClipperLib.Paths();
@@ -111,7 +112,7 @@ export function channelPaths(points, closed, profile, caps = {}, roundedCorners 
     const side = turn > 0 ? -1 : 1;
     const start = Math.atan2(before.x * side, -before.y * side), radius = point.width / 2;
     const offset = (direction, sign) => ({ x: point.x - direction.y * radius * sign, y: point.y + direction.x * radius * sign });
-    if (!roundedCorners) {
+    if (!(profile.shapeAt ? profile.shapeAt(point, 'roundedChannelCorners') : roundedCorners)) {
       const a = offset(before, side), b = offset(after, side);
       const cosine = Math.cos(turn / 2);
       const middle = start + turn / 2;
