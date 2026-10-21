@@ -24,7 +24,7 @@ export const bridgePanel = `
   <details class="panel-details"><summary>Advanced</summary><div class="bridge-fields">${widthControl('minimum-material-width', 'Minimum Material Width', 0.1, 0.5)}<label class="check-label"><input id="bridge-reinforcement" type="checkbox" /><span>Add Reinforcement</span></label></div><button id="clear-bridge-exclusions" class="small-button" disabled>Allow Removed Connections</button><p class="control-hint">Allow previously removed automatic connections to be generated again.</p></details>
 </section>`;
 
-export function createBridgeEditor({ state, render, mutate, snapshot, restore, record, commit, save, notify, svgPoint, screenUnit, runTask }) {
+export function createBridgeEditor({ state, render, preview, mutate, snapshot, restore, record, commit, save, notify, svgPoint, screenUnit, runTask }) {
   const $ = selector => document.querySelector(selector), svg = $('#preview-svg');
   const selectionViewport = $('#canvas-viewport');
   let gesture = null, adding = false, start = null;
@@ -257,6 +257,8 @@ export function createBridgeEditor({ state, render, mutate, snapshot, restore, r
       input.value = slider.value;
       slider.removeAttribute('aria-valuetext');
       slider.style.setProperty('--range', `${(slider.value - slider.min) / (slider.max - slider.min) * 100}%`);
+      if (id === 'selected-bridge-width') preview({ selectedBridgeWidth: toMillimeters(slider.value, state) });
+      else preview({ guide: { label: id === 'bridge-width' ? 'New Bridge Width' : 'Minimum Material Width', width: toMillimeters(slider.value, state) } });
     });
     // Commit on release so geometry analysis cannot interrupt a slider drag.
     slider.addEventListener('change', () => input.dispatchEvent(new Event('change', { bubbles: true })));

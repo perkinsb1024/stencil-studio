@@ -5,7 +5,7 @@ import { scaleRegions, validPolygon, channelWidthAt, createChannelWidthProfile }
 import { nearestOnContour } from './tab-layout.js';
 import { materialMode } from './material-geometry.js';
 
-export function createRegionEditor({ state, render, mutate, snapshot, restore, record, beginEdit, commit, save, notify, svgPoint, screenUnit }) {
+export function createRegionEditor({ state, render, preview, mutate, snapshot, restore, record, beginEdit, commit, save, notify, svgPoint, screenUnit }) {
   const $ = selector => document.querySelector(selector);
   const svg = $('#preview-svg');
   let gesture = null, hover = null, pickingLayer = false, pickingArtwork = null, lastCornerClick = null;
@@ -99,10 +99,10 @@ export function createRegionEditor({ state, render, mutate, snapshot, restore, r
     svg.classList.toggle('picking-region-layer', pickingLayer);
     save();
   }
-  function overlay() {
+  function overlay(regions = state.scaled.regions) {
     if (!state.editingRegions) return '';
     const unit = screenUnit();
-    const shapes = state.scaled.regions.map((r, i) => {
+    const shapes = regions.map((r, i) => {
       const active = r.id === state.selectedRegion;
       return `<g class="width-region ${active ? 'selected' : ''}"><path data-region="${r.id}" d="${pathData(r.points)}" tabindex="0" role="button" aria-label="Region ${i + 1}, ${formatLength(r.width, state)}, ${r.contourId === null ? 'all objects' : `object ${state.artwork.contours.findIndex(c => c.id === r.contourId) + 1}`}" aria-pressed="${active}" vector-effect="non-scaling-stroke"/><text x="${r.points[0].x}" y="${r.points[0].y - unit * 9}" font-size="${unit * 11}" pointer-events="none">${r.label ?? `Region ${i + 1}`} (${formatLength(r.width, state)})</text>${active && !state.drawingRegion ? r.points.map((p, j) => `<circle data-region="${r.id}" data-region-vertex="${j}" cx="${p.x}" cy="${p.y}" r="${unit * 6}" data-screen-radius="6" tabindex="0" role="button" aria-label="Region ${i + 1} corner ${j + 1}; drag or use arrow keys to move" vector-effect="non-scaling-stroke"/>`).join('') : ''}</g>`;
     }).join('');
@@ -192,6 +192,7 @@ export function createRegionEditor({ state, render, mutate, snapshot, restore, r
       if (region) region[property] = state[stateKey];
       setLengthValue($(`#${id}`), state[stateKey], state);
       slider.style.setProperty('--range', `${(slider.value - slider.min) / (slider.max - slider.min) * 100}%`);
+      preview();
     });
     slider.addEventListener('change', commit);
     slider.addEventListener('blur', commit);

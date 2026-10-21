@@ -15,6 +15,7 @@ import { createSimplifyEditor } from './simplify-editor.js';
 import { createPreviewPan } from './preview-pan.js';
 import { createMeasureTool } from './measure-tool.js';
 import { createPreviewDimensions } from './preview-dimensions.js';
+import { createLivePreview } from './live-preview.js';
 import { createBridgeEditor, bridgePanel } from './bridge-editor.js';
 import { materialMode, scaleBridges } from './material-geometry.js';
 import { suggestionDefaults, treatmentLabel } from './area-suggestions.js';
@@ -107,7 +108,7 @@ function rollbackGeneration() {
   render();
 }
 function render() {
-  if (!state.artwork || busy.active) return;
+  if (!state.artwork || busy.active || livePreview.active) return;
   syncEditingFlags();
   const settings = geometrySettings(), key = JSON.stringify(settings);
   const geometryChanged = detectAreas || geometryArtwork !== state.artwork || geometryKey !== key;
@@ -542,9 +543,9 @@ function resizePreviewHandles() {
     } else handle.setAttribute('r', radius);
   }
 }
-function renderTabMarkers() {
+function renderTabMarkers(bridges = state.result.bridges) {
   const radius = screenUnit() * 3.5;
-  return `<g class="tab-markers" style="--tab-handle-unit:${screenUnit()}px">${state.result.bridges.map(b => {
+  return `<g class="tab-markers" style="--tab-handle-unit:${screenUnit()}px">${bridges.map(b => {
     const selected = state.editing && state.selectedTabs.some(ref => matchesTab(b, ref));
     const color = b.custom ? '#258477' : '#c3963e';
     const label = `${b.custom ? 'Custom' : 'Automatic'} tab, object ${state.scaled.contours.findIndex(c => c.id === b.contourId) + 1}, ${formatLength(b.width, state)}${b.widthOverride == null ? ', default width' : ', width override'}`;
@@ -656,11 +657,13 @@ function updateSelectedTab(property, value, live = false) {
     if (property === 'widthOverride') setLengthValue($('#selected-tab-width'), value, state);
     else $('#selected-tab-position').value = Number((value * 100).toFixed(2));
     updateRangePaint();
+    livePreview.schedule();
   }
   else { mutate(apply); positionGesture = null; }
 }
-const regionEditor = createRegionEditor({ state, render, mutate, snapshot, restore, record: before => history.record(before), beginEdit: () => { if (!pendingSettings) pendingSettings = snapshot(); }, commit: commitSettings, save: queueWorkspaceSave, notify, svgPoint, screenUnit });
+const regionEditor = createRegionEditor({ state, render, preview: () => livePreview.schedule(), mutate, snapshot, restore, record: before => history.record(before), beginEdit: () => { if (!pendingSettings) pendingSettings = snapshot(); }, commit: commitSettings, save: queueWorkspaceSave, notify, svgPoint, screenUnit });
 const bridgeEditor = createBridgeEditor({ state, render, mutate, snapshot, restore, record: before => history.record(before), commit: commitSettings, save: queueWorkspaceSave, notify, svgPoint, screenUnit,
+  preview: overrides => livePreview.schedule(overrides),
   runTask(task, payload, label, complete) {
     const viewport = $('#canvas-viewport');
     const view = task === 'snap' ? {
@@ -676,6 +679,22 @@ const bridgeEditor = createBridgeEditor({ state, render, mutate, snapshot, resto
     });
   },
 });
+const livePreview = createLivePreview({ svg: $('#preview-svg'), state, screenUnit, markers: renderTabMarkers, regionMarkers: regions => regionEditor.overlay(regions) });
+let rangePointer = null;
+document.addEventListener('pointerdown', event => {
+  if (event.target.matches('input[type="range"]')) rangePointer = { id: event.pointerId, input: event.target };
+}, true);
+function finishRangePointer(event) {
+  if (!rangePointer || event && rangePointer.id !== event.pointerId) return;
+  const { input } = rangePointer; rangePointer = null;
+  // Returning to the starting value emits no native change event. Still end
+  // its visual preview, after any normal change handler has committed it.
+  requestAnimationFrame(() => {
+    if (livePreview.active) input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+}
+for (const type of ['pointerup', 'pointercancel']) document.addEventListener(type, finishRangePointer, true);
+window.addEventListener('blur', () => finishRangePointer());
 const simplifyEditor = createSimplifyEditor({
   state, commit: commitWorkspaceEdits, download: downloadFile,
   apply(source) {
@@ -1199,6 +1218,7 @@ function updateHistoryButtons() {
   queueWorkspaceSave();
 }
 function commitSettings() {
+  livePreview.clear();
   positionGesture = null;
   if (pendingSettings) {
     history.record(pendingSettings); pendingSettings = null;
@@ -1246,7 +1266,8 @@ function syncControl(key, value, live = false) {
   syncSettingInputs();
   // Rebuilding geometry locks the controls and ends the native slider drag.
   // Keep values live, then generate once the range emits change on release.
-  if (!live) commitSettings();
+  if (live) livePreview.schedule();
+  else commitSettings();
 }
 $('#artworkHeight').addEventListener('change', e => {
   if (!state.artwork) return;

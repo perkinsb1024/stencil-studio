@@ -17,7 +17,7 @@ function segmentRange(a, b, bounds) {
   return [start, end];
 }
 
-function samplePath(points, profile) {
+export function samplePath(points, profile, spacing = 0.25) {
   const sampled = [{ ...points[0], width: profile.widthAt(points[0]) }];
   for (let i = 1; i < points.length; i++) {
     const a = points[i - 1], b = points[i], direction = { x: b.x - a.x, y: b.y - a.y };
@@ -41,7 +41,7 @@ function samplePath(points, profile) {
     for (let j = 1; j < breaks.length; j++) {
       const start = breaks[j - 1], end = breaks[j]; if (end - start < 1e-10) continue;
       const mid = (start + end) / 2;
-      const count = ranges.some(([from, to]) => mid >= from && mid <= to) ? Math.max(1, Math.ceil((end - start) * length / 0.25)) : 1;
+      const count = ranges.some(([from, to]) => mid >= from && mid <= to) ? Math.max(1, Math.ceil((end - start) * length / spacing)) : 1;
       for (let k = 1; k <= count; k++) {
         const t = start + (end - start) * k / count;
         const p = { x: a.x + direction.x * t, y: a.y + direction.y * t };

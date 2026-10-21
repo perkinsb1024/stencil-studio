@@ -27,7 +27,45 @@ export function at(contour, d) {
 }
 
 function slice(contour, from, to) {
-  return [at(contour, from), ...contour.points.filter((_, i) => contour.cumulative[i] > from + 1e-7 && contour.cumulative[i] < to - 1e-7), at(contour, to)];
+  function bound(value, afterEqual) {
+    let lo = 0, hi = contour.cumulative.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1, distance = contour.cumulative[mid];
+      if (distance < value || afterEqual && distance === value) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+  return [at(contour, from), ...contour.points.slice(bound(from + 1e-7, true), bound(to - 1e-7, false)), at(contour, to)];
+}
+
+// Centerlines and tab intervals only: shared by the live SVG preview and the
+// final polygon calculation, without offsets, unions, or material analysis.
+export function layoutChannel(contour, options, layout) {
+  const { length, closed } = contour;
+  const tabs = resolveTabs(contour, options, layout), bridges = [];
+  const gaps = [];
+  for (const tab of tabs) {
+    const { center, gapWidth: gap } = tab;
+    const start = center - gap / 2, end = center + gap / 2;
+    let segments;
+    if (start < 0 && closed) segments = [[length + start, length], [0, end]];
+    else if (end > length && closed) segments = [[start, length], [0, end - length]];
+    else segments = [[Math.max(0, start), Math.min(length, end)]];
+    gaps.push(...segments);
+    bridges.push({ ...tab, contourId: contour.id, point: at(contour, center), before: at(contour, segments[0][0]), after: at(contour, segments.at(-1)[1]), segments: segments.map(([from, to]) => slice(contour, from, to)) });
+  }
+  gaps.sort((a, b) => a[0] - b[0]);
+  const intervals = [];
+  let cursor = 0;
+  for (const [start, end] of gaps) { if (start > cursor + 1e-7) intervals.push([cursor, start]); cursor = Math.max(cursor, end); }
+  if (cursor < length - 1e-7) intervals.push([cursor, length]);
+  let pieces = intervals.map(([from, to]) => ({ points: slice(contour, from, to), start: closed || from > 0, end: closed || to < length }));
+  if (closed && intervals.length > 1 && intervals[0][0] === 0 && intervals.at(-1)[1] === length) {
+    const first = pieces.shift(), last = pieces.pop();
+    pieces.push({ points: [...last.points, ...first.points.slice(1)], start: last.start, end: first.end });
+  }
+  return { tabs, bridges, pieces };
 }
 
 export function generateStencil(contours, options, onProgress = () => {}) {
@@ -56,7 +94,8 @@ export function generateStencil(contours, options, onProgress = () => {}) {
       continue;
     }
     const layout = tabLayouts[contourId];
-    const tabs = resolveTabs(contour, options, layout);
+    const channel = layoutChannel(contour, options, layout);
+    const { tabs, pieces } = channel;
     if (!layout) reducedTabs ||= tabs.length < tabCount || tabs.some(t => t.width < t.requestedWidth - 1e-7);
     else {
       if (!tabs.length && closed) warnings.push(`Object ${index + 1} has no tabs; its inner piece may come loose.`);
@@ -64,32 +103,12 @@ export function generateStencil(contours, options, onProgress = () => {}) {
         warnings.push(`Object ${index + 1}: a requested ${tab.requestedWidth.toFixed(1)} mm tab is ${tab.width.toFixed(1)} mm to fit the object.`);
       }
     }
-    const gaps = [];
-    for (const tab of tabs) {
-      const { center, gapWidth: gap } = tab;
-      const start = center - gap / 2, end = center + gap / 2;
-      let segments;
-      if (start < 0 && closed) segments = [[length + start, length], [0, end]];
-      else if (end > length && closed) segments = [[start, length], [0, end - length]];
-      else segments = [[Math.max(0, start), Math.min(length, end)]];
-      gaps.push(...segments);
-      bridges.push({ ...tab, contourId, point: at(contour, center), before: at(contour, segments[0][0]), after: at(contour, segments.at(-1)[1]), segments: segments.map(([from, to]) => slice(contour, from, to)) });
-    }
+    bridges.push(...channel.bridges.map(bridge => ({ ...bridge, contourId })));
     // Report overlaps, including across a closed path's seam.
     if (tabs.some((a, i) => tabs.slice(i + 1).some(b => {
       const delta = Math.abs(a.center - b.center);
       return (closed ? Math.min(delta, length - delta) : delta) < (a.gapWidth + b.gapWidth) / 2 - 1e-7;
     }))) warnings.push(`Object ${index + 1} has overlapping tabs; move or remove a tab to separate them.`);
-    gaps.sort((a, b) => a[0] - b[0]);
-    const intervals = [];
-    let cursor = 0;
-    for (const [start, end] of gaps) { if (start > cursor + 1e-7) intervals.push([cursor, start]); cursor = Math.max(cursor, end); }
-    if (cursor < length - 1e-7) intervals.push([cursor, length]);
-    let pieces = intervals.map(([from, to]) => ({ points: slice(contour, from, to), start: closed || from > 0, end: closed || to < length }));
-    if (closed && intervals.length > 1 && intervals[0][0] === 0 && intervals.at(-1)[1] === length) {
-      const first = pieces.shift(), last = pieces.pop();
-      pieces.push({ points: [...last.points, ...first.points.slice(1)], start: last.start, end: first.end });
-    }
     const profile = createChannelWidthProfile(contourId, options);
     for (const piece of pieces) ribbons.push(...channelPaths(piece.points, closed && !tabs.length, profile, {
       start: piece.start && profile.shapeAt(piece.points[0], 'roundedTabs'),
