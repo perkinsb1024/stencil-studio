@@ -223,7 +223,19 @@ dialog{border:1px solid #d8cee1;border-radius:12px;max-width:560px;width:calc(10
 
 .canvas-viewport.measuring{touch-action:none;user-select:none}
 
-.canvas-tool-buttons,.canvas-zoom-buttons{display:flex;align-items:center;gap:3px}.canvas-zoom-buttons{margin-left:9px;padding-left:12px;border-left:1px solid #d5cddc}
+.canvas-tool-buttons,.canvas-zoom-buttons{display:flex;align-items:center;gap:3px}.canvas-zoom-buttons{gap:8px;margin-left:9px;padding-left:12px;border-left:1px solid #d5cddc}
+.canvas-tool-buttons{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.canvas-tool-buttons button{padding:5px 10px;border-radius:6px;font-weight:500;box-shadow:0 1px 2px #30203908}
+.canvas-tool-buttons button:where(:not(:disabled):not([aria-pressed=true])){background:#fff;color:var(--muted)}
+.zoom-stepper{display:flex;align-items:stretch;border:1px solid #d5cddc;border-radius:6px;background:#fff;box-shadow:0 1px 2px #30203908}
+.zoom-controls .zoom-stepper button{min-height:30px;border:0;border-radius:5px 0 0 5px;color:var(--muted)}
+.zoom-controls .zoom-stepper button:last-child{border-radius:0 5px 5px 0}
+.zoom-controls .zoom-stepper button:focus-visible{outline-offset:-3px}
+.zoom-controls .zoom-stepper #zoom-label{display:flex;align-items:center;justify-content:center;min-width:52px;padding:0 6px;border-inline:1px solid #e9e4ed;font-weight:500}
+.zoom-controls #zoom-fit{min-width:32px;border-radius:6px;background:#fff;box-shadow:0 1px 2px #30203908;color:var(--muted)}
+.zoom-controls #zoom-fit:hover{background:#e8e1ef;color:var(--purple)}
+.zoom-controls #zoom-fit .icon{width:16px;height:16px}
+@media(max-width:700px){.zoom-controls .zoom-stepper button{min-height:34px}.zoom-controls #zoom-fit{min-width:36px}}
 @media(max-width:480px){.canvas-zoom-buttons{margin-left:5px;padding-left:8px}}
 
 .measure-snap-options{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-right:4px}.measure-snap-options label{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;cursor:pointer}.measure-snap-options input{margin:0;accent-color:var(--purple)}

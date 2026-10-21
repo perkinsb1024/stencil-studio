@@ -531,6 +531,7 @@ function screenUnit() {
 function resizePreviewHandles() {
   const unit = screenUnit();
   $('#preview-svg').querySelector('.material-bridge-overlays')?.style.setProperty('--bridge-handle-unit', `${unit}px`);
+  $('#preview-svg').querySelector('.tab-markers')?.style.setProperty('--tab-handle-unit', `${unit}px`);
   for (const handle of $('#preview-svg').querySelectorAll('[data-screen-radius]')) {
     const radius = Math.min(Number(handle.dataset.screenRadius) * unit, Number(handle.dataset.maxRadius ?? Infinity));
     if (handle.tagName === 'rect') {
@@ -543,15 +544,15 @@ function resizePreviewHandles() {
 }
 function renderTabMarkers() {
   const radius = screenUnit() * 3.5;
-  return `<g class="tab-markers">${state.result.bridges.map(b => {
+  return `<g class="tab-markers" style="--tab-handle-unit:${screenUnit()}px">${state.result.bridges.map(b => {
     const selected = state.editing && state.selectedTabs.some(ref => matchesTab(b, ref));
     const color = b.custom ? '#258477' : '#c3963e';
     const label = `${b.custom ? 'Custom' : 'Automatic'} tab, object ${state.scaled.contours.findIndex(c => c.id === b.contourId) + 1}, ${formatLength(b.width, state)}${b.widthOverride == null ? ', default width' : ', width override'}`;
-    return `<g data-tab="${b.id}" data-outline="${b.contourId}" class="tab-marker ${selected ? 'selected' : ''}" ${state.editing ? `tabindex="0" role="button" aria-label="${label}" aria-pressed="${selected}"` : ''}>
+    return `<g data-tab="${b.id}" data-outline="${b.contourId}" class="tab-marker ${selected ? 'selected' : ''}" style="--tab-color:${color}" ${state.editing ? `tabindex="0" role="button" aria-label="${label}" aria-pressed="${selected}"` : ''}>
       <title>${label}</title>
       <path d="${b.segments.map(p => pathData(p, false)).join('')}" fill="none" stroke="${color}" stroke-width="${b.channelWidth + 0.65}" opacity="0.65"/>
-      ${b.custom ? `<circle cx="${b.point.x}" cy="${b.point.y}" r="${radius}" data-screen-radius="3.5"` : `<rect x="${b.point.x - radius}" y="${b.point.y - radius}" width="${radius * 2}" height="${radius * 2}" data-screen-radius="3.5"`} fill="${color}" stroke="#fffef9" stroke-width="1" vector-effect="non-scaling-stroke"/>
-      ${selected ? `<circle cx="${b.point.x}" cy="${b.point.y}" r="${radius + screenUnit() * 4}" data-screen-radius="7.5" fill="none" stroke="#ff2da6" stroke-width="3" vector-effect="non-scaling-stroke"/>` : ''}
+      ${b.custom ? `<circle cx="${b.point.x}" cy="${b.point.y}" r="${radius}" data-screen-radius="3.5"` : `<rect x="${b.point.x - radius}" y="${b.point.y - radius}" width="${radius * 2}" height="${radius * 2}" data-screen-radius="3.5"`} class="tab-center" fill="${color}"/>
+      ${selected ? `<circle class="tab-selection-ring" cx="${b.point.x}" cy="${b.point.y}" r="${radius + screenUnit() * 4}" data-screen-radius="7.5" fill="none"/>` : ''}
       ${state.editing ? `<circle cx="${b.point.x}" cy="${b.point.y}" r="${screenUnit() * 12}" data-screen-radius="12" fill="transparent"/>` : ''}
     </g>`;
   }).join('')}</g>`;
@@ -650,7 +651,12 @@ function updateSelectedTab(property, value, live = false) {
       customizeContour(state.tabLayouts, contour, state).find(t => t.id === ref.id)[property] = value;
     }
   };
-  if (live) { apply(); scheduleRender(); }
+  if (live) {
+    apply();
+    if (property === 'widthOverride') setLengthValue($('#selected-tab-width'), value, state);
+    else $('#selected-tab-position').value = Number((value * 100).toFixed(2));
+    updateRangePaint();
+  }
   else { mutate(apply); positionGesture = null; }
 }
 const regionEditor = createRegionEditor({ state, render, mutate, snapshot, restore, record: before => history.record(before), beginEdit: () => { if (!pendingSettings) pendingSettings = snapshot(); }, commit: commitSettings, save: queueWorkspaceSave, notify, svgPoint, screenUnit });
@@ -967,6 +973,7 @@ selectionViewport.addEventListener('pointerdown', e => {
   } else selectTab(outline?.dataset.outline ?? state.selectedContour, null);
   drag = { kind: marker ? 'tabs' : 'box', pointerId: e.pointerId, x: e.clientX, y: e.clientY, start: svgPoint(e), before: snapshot(), moved: false,
     tabs: selectionPositions(), anchor: selectedBridge()?.position, contourId: state.selectedContour, selectionContour, previous: e.shiftKey ? previous.filter(ref => marker || !selectionContour || ref.contourId === selectionContour) : [] };
+  preview.classList.toggle('dragging-object', drag.kind === 'tabs');
   // Capture on the persistent SVG, whose marker children are replaced on render.
   if (e.isTrusted) preview.setPointerCapture(e.pointerId);
   e.preventDefault(); render();
@@ -1024,6 +1031,7 @@ function finishDrag(event, cancelled = false) {
     }
   }
   const finished = drag; drag = null;
+  preview.classList.remove('dragging-object');
   $('#tab-selection-box')?.remove();
   clearMarginSelection(preview);
   if (finished.kind === 'layers') {
@@ -1190,7 +1198,14 @@ function updateHistoryButtons() {
   $('#undo').disabled = !history.canUndo; $('#redo').disabled = !history.canRedo;
   queueWorkspaceSave();
 }
-function commitSettings() { positionGesture = null; if (pendingSettings) { history.record(pendingSettings); pendingSettings = null; } queueWorkspaceSave(); }
+function commitSettings() {
+  positionGesture = null;
+  if (pendingSettings) {
+    history.record(pendingSettings); pendingSettings = null;
+    scheduleRender();
+  }
+  queueWorkspaceSave();
+}
 function mutate(action) {
   commitSettings(); cancelAnimationFrame(renderFrame);
   const before = snapshot(); action();
@@ -1216,6 +1231,7 @@ function syncSettingInputs() {
     button.classList.toggle('active', selected);
     button.setAttribute('aria-pressed', String(selected));
   });
+  $('#offset-value').textContent = `${state.tabOffset}%`;
   updateRangePaint();
 }
 function syncControl(key, value, live = false) {
@@ -1227,7 +1243,9 @@ function syncControl(key, value, live = false) {
   if (['tabCount', 'tabOffset', 'tabWidth'].includes(key)) state.showTabs = true;
   if (!pendingSettings) pendingSettings = snapshot();
   state[key] = number;
-  syncSettingInputs(); scheduleRender();
+  syncSettingInputs();
+  // Rebuilding geometry locks the controls and ends the native slider drag.
+  // Keep values live, then generate once the range emits change on release.
   if (!live) commitSettings();
 }
 $('#artworkHeight').addEventListener('change', e => {

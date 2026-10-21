@@ -113,8 +113,11 @@ export function createSimplifyEditor({ state, commit, apply, download }) {
         const value = field.value === '' ? options[key] : Number(field.value);
         if (!Number.isFinite(value)) return paintInputs();
         options[key] = Math.min(Number(field.max), Math.max(0, value));
-        paintInputs(); requestPreview();
+        paintInputs();
+        if (suffix) { result = null; updateResultButtons(); }
+        else requestPreview();
       });
+      if (suffix) field.addEventListener('change', requestPreview);
     }
   }
   function setZoom(value) {

@@ -100,6 +100,7 @@ export function createBridgeEditor({ state, render, mutate, snapshot, restore, r
   function finishGesture(cancelled = false) {
     if (!gesture) return;
     const finished = gesture; gesture = null;
+    svg.classList.remove('dragging-object');
     if (finished.frame != null) cancelAnimationFrame(finished.frame);
     if (finished.kind === 'box') {
       clearMarginSelection(svg);
@@ -304,6 +305,7 @@ export function createBridgeEditor({ state, render, mutate, snapshot, restore, r
       gesture.raw = structuredClone(selected());
       gesture.snapLines = bridgeSnapLines(state.result.baseCuts ?? [], screenUnit() * 8);
     }
+    svg.classList.toggle('dragging-object', !!gesture && gesture.kind !== 'box');
     if (gesture && e.isTrusted) svg.setPointerCapture(e.pointerId);
     e.preventDefault();
     // Selection changes need only the editor overlays and inspector, not a

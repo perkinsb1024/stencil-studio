@@ -190,7 +190,8 @@ export function createRegionEditor({ state, render, mutate, snapshot, restore, r
       if (region) beginEdit();
       state[stateKey] = property === 'taperLength' ? Math.round(toMillimeters(e.target.value, state) * 10) / 10 : toMillimeters(e.target.value, state);
       if (region) region[property] = state[stateKey];
-      render();
+      setLengthValue($(`#${id}`), state[stateKey], state);
+      slider.style.setProperty('--range', `${(slider.value - slider.min) / (slider.max - slider.min) * 100}%`);
     });
     slider.addEventListener('change', commit);
     slider.addEventListener('blur', commit);
@@ -242,6 +243,7 @@ export function createRegionEditor({ state, render, mutate, snapshot, restore, r
     commit();
     select(target.dataset.region);
     gesture = { pointerId: e.pointerId, start: toArtwork(point), before: snapshot(), original: structuredClone(selected().points), vertex: target.hasAttribute('data-region-vertex') ? Number(target.dataset.regionVertex) : null };
+    svg.classList.add('dragging-object');
     if (e.isTrusted) svg.setPointerCapture(e.pointerId);
     e.preventDefault();
   });
@@ -262,6 +264,7 @@ export function createRegionEditor({ state, render, mutate, snapshot, restore, r
   function finishGesture(cancelled = false) {
     if (!gesture) return;
     const previous = gesture; gesture = null;
+    svg.classList.remove('dragging-object');
     if (cancelled) restore(previous.before); else record(previous.before);
     if (svg.hasPointerCapture(previous.pointerId)) svg.releasePointerCapture(previous.pointerId);
     if (!cancelled) render();
