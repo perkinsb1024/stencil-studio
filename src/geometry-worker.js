@@ -8,12 +8,14 @@ import { suggestAreas, applyAreaSuggestions } from './area-suggestions.js';
 
 self.onmessage = ({ data }) => {
   try {
+    const reportProgress = value => self.postMessage({ type: 'progress', value });
     let result;
     const { task, settings, artwork } = data;
     if (task === 'simplify') result = simplifyArtwork(artwork, data.options);
-    else if (task === 'bridges') result = generateRegionBridges(data.contours, data.channelCuts, settings);
+    else if (task === 'bridges') result = generateRegionBridges(data.contours, data.channelCuts, settings, reportProgress);
     else if (task === 'snap') result = snapRegionBridge(data.contours, data.channelCuts, settings, data.bridge);
     else {
+      reportProgress(0);
       const padding = Math.max(settings.margin, Math.max(settings.channelWidth, ...settings.regions.map(r => r.width)) / 2 + 2);
       const scaled = { ...scaleArtwork(artwork, settings.artworkWidth, padding), padding, regions: scaleRegions(settings.regions, settings.artworkWidth, padding) };
       let suggestions;
@@ -22,7 +24,8 @@ self.onmessage = ({ data }) => {
         suggestions = suggestAreas(artwork, options());
         applyAreaSuggestions(settings, artwork, suggestions);
       }
-      result = { scaled, stencil: generateStencil(scaled.contours, options()), suggestions,
+      reportProgress(0.1);
+      result = { scaled, stencil: generateStencil(scaled.contours, options(), value => reportProgress(0.1 + value * 0.9)), suggestions,
         materialTreatments: settings.materialTreatments, hiddenContours: settings.hiddenContours, cutawayContours: settings.cutawayContours };
     }
     self.postMessage({ result });

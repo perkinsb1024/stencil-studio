@@ -30,7 +30,8 @@ function slice(contour, from, to) {
   return [at(contour, from), ...contour.points.filter((_, i) => contour.cumulative[i] > from + 1e-7 && contour.cumulative[i] < to - 1e-7), at(contour, to)];
 }
 
-export function generateStencil(contours, options) {
+export function generateStencil(contours, options, onProgress = () => {}) {
+  onProgress(0);
   const materialEdits = Object.values(options.materialTreatments ?? {}).some(mode => mode !== 'outline') || options.regionBridges?.length;
   const materialFeatures = options.sheet && (materialEdits || options.analyzeMaterial);
   const { tabCount, tabLayouts = {} } = options;
@@ -39,6 +40,7 @@ export function generateStencil(contours, options) {
   const ribbons = [], bridges = [], warnings = [];
   let reducedTabs = false, hasCutaways = false;
   for (const [index, contour] of contours.entries()) {
+    onProgress(0.7 * index / Math.max(1, contours.length));
     const contourId = contour.id ?? `outline-${index}`;
     if (hidden.has(contourId)) continue;
     if (materialFeatures && materialMode(contour, options) !== 'outline') continue;
@@ -91,16 +93,19 @@ export function generateStencil(contours, options) {
     const profile = createChannelWidthProfile(contourId, options);
     for (const piece of pieces) ribbons.push(...channelPaths(piece.points, closed && !tabs.length, profile, options.roundedTabs ? piece : {}, options.roundedChannelCorners !== false));
   }
+  onProgress(0.7);
   const clipper = new ClipperLib.Clipper();
   clipper.AddPaths(ribbons, ClipperLib.PolyType.ptSubject, true);
   const result = new ClipperLib.Paths();
   clipper.Execute(ClipperLib.ClipType.ctUnion, result, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
   let paths = result.map(path => path.map(p => ({ x: p.X / SCALE, y: p.Y / SCALE })));
+  onProgress(0.8);
   const material = materialFeatures ? composeMaterial(contours, paths, options) : null;
   // A review-only connectivity check must not rewrite the channel geometry.
   if (material) { if (materialEdits || options.cutawayContours?.length) paths = material.paths; warnings.push(...material.warnings); }
   if (reducedTabs) warnings.push('Some small contours have fewer or narrower tabs so there is room for the channel.');
   // Nearby outlines can cut across a bridge. Detect this rather than claiming every island is supported.
+  onProgress(0.9);
   const damaged = bridges.filter(b => {
     const point = { X: Math.round(b.point.x * SCALE), Y: Math.round(b.point.y * SCALE) };
     const locations = paths.map(poly => ClipperLib.Clipper.PointInPolygon(point, poly.map(p => ({ X: Math.round(p.x * SCALE), Y: Math.round(p.y * SCALE) }))));
@@ -108,6 +113,7 @@ export function generateStencil(contours, options) {
   });
   if (damaged.length) warnings.push(`${damaged.length} tab${damaged.length === 1 ? '' : 's'} intersect another channel${hasCutaways ? ' or full cut-away' : ''}. Try a narrower channel or change tab position; inspect before cutting.`);
   for (const bridge of bridges) bridge.channelWidth = channelWidthAt(bridge.point, bridge.contourId, options);
+  onProgress(1);
   return { ...material, paths, channelCuts: result.map(path => path.map(p => ({ x: p.X / SCALE, y: p.Y / SCALE }))), bridges, warnings };
 }
 

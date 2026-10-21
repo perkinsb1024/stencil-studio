@@ -350,12 +350,16 @@ export function snapRegionBridge(contours, channelCuts, options, bridge) {
 
 // Deterministic, bounded greedy search. Each accepted strip is verified using
 // the boolean geometry, rather than assuming its graph edge makes a connection.
-export function generateRegionBridges(contours, channelCuts, options) {
+export function generateRegionBridges(contours, channelCuts, options, onProgress = () => {}) {
+  onProgress(0);
   let bridges = [...(options.regionBridges ?? []).filter(b => !b.automatic)];
   let result = composeMaterial(contours, channelCuts, { ...options, regionBridges: bridges });
+  const initialConnections = Math.max(1, result.components.length - 1);
+  onProgress(0.05);
   const width = options.bridgeWidth ?? 3, excluded = new Set(options.bridgeExclusions ?? []);
   const score = r => r.components.length;
   for (let iteration = 0; iteration < 100 && bridges.length < 100; iteration++) {
+    onProgress(0.05 + 0.7 * (1 - Math.max(0, result.components.length - 1) / initialConnections));
     if (result.components.length <= 1) break;
     const candidates = featureCandidates(contours, result, options);
     for (const component of result.components) {
@@ -378,10 +382,13 @@ export function generateRegionBridges(contours, channelCuts, options) {
     }
     if (!accepted) break;
   }
+  onProgress(0.75);
   if (options.bridgeReinforcement) {
     // Retain one additional separated connection per original unsupported area.
     const original = composeMaterial(contours, channelCuts, { ...options, regionBridges: options.regionBridges?.filter(b => !b.automatic) ?? [] });
-    for (const island of original.unsupported.slice(0, 50)) {
+    const islands = original.unsupported.slice(0, 50);
+    for (const [index, island] of islands.entries()) {
+      onProgress(0.75 + 0.2 * index / islands.length);
       const targets = original.components.filter(c => c.sheetConnected);
       const candidates = [...featureCandidates(contours, original, options).filter(b => pointInMaterial(b.a, island.paths)), ...targets.flatMap(target => candidatesBetween(island, target, width))].sort((a, b) => a.designScore - b.designScore);
       for (const candidate of candidates) {
@@ -397,5 +404,6 @@ export function generateRegionBridges(contours, channelCuts, options) {
       }
     }
   }
+  onProgress(1);
   return bridges;
 }

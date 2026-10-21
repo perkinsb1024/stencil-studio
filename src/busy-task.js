@@ -2,6 +2,10 @@
 export function createBusyTask({ root, overlay, stage, onCancel, onError }) {
   const cancel = overlay.querySelector('button');
   const label = overlay.querySelector('[role="status"]');
+  const progress = document.createElement('progress');
+  progress.className = 'busy-progress';
+  progress.max = 1;
+  label.after(progress);
   let job = null, controls = [], focus, focusSelector;
   const disabledObserver = new MutationObserver(records => {
     for (const { target } of records) {
@@ -57,6 +61,8 @@ export function createBusyTask({ root, overlay, stage, onCancel, onError }) {
         .filter(control => control !== cancel).map(control => [control, control.disabled]);
       for (const [control] of controls) control.disabled = true;
       root.classList.add('is-busy'); stage.setAttribute('aria-busy', 'true');
+      progress.removeAttribute('value');
+      progress.setAttribute('aria-label', message);
       label.textContent = message; overlay.hidden = false; cancel.focus({ preventScroll: true });
       try {
         const worker = new Worker(new URL('./geometry-worker.js', import.meta.url), { type: 'module' });
@@ -68,7 +74,14 @@ export function createBusyTask({ root, overlay, stage, onCancel, onError }) {
           if (error) onError(error); else complete(result);
           if (!job && document.activeElement === document.body) restoreFocus();
         };
-        worker.onmessage = ({ data }) => finish(data.error, data.result);
+        worker.onmessage = ({ data }) => {
+          if (job?.worker !== worker) return;
+          if (data.type === 'progress') {
+            progress.value = Math.max(progress.value, Math.min(1, Math.max(0, data.value)));
+            return;
+          }
+          finish(data.error, data.result);
+        };
         worker.onerror = () => finish('The geometry calculation could not finish. Please try again.');
         worker.onmessageerror = () => finish('The geometry result could not be read. Please try again.');
         worker.postMessage({ task, ...payload });
