@@ -562,7 +562,9 @@ function updateTabEditor() {
   const contours = channelContours();
   const automatic = contours.filter(c => !Object.hasOwn(state.tabLayouts, c.id)).length;
   const custom = contours.length - automatic;
-  $('#automatic-scope').textContent = `Placement affects ${automatic} automatic outline${automatic === 1 ? '' : 's'}. ${custom} custom. Each contour in a compound object gets its own count.`;
+  $('#automatic-scope').textContent = automatic === 0
+    ? 'Count and position are disabled because all outlines use custom tabs. To enable these controls, open Advanced and choose “Use Automatic Tabs for All Objects”.'
+    : `Count and position apply to ${automatic} automatic outline${automatic === 1 ? '' : 's'}.${custom ? ` The ${custom === 1 ? 'outline with custom tabs keeps its' : `${custom} outlines with custom tabs keep their`} current count and positions.` : ''}`;
   for (const id of ['tabCount', 'tabOffset', 'tabs-minus', 'tabs-plus']) $(`#${id}`).disabled = automatic === 0;
   $('#reset-all-tabs').disabled = Object.keys(state.tabLayouts).length === 0;
   $('#edit-tabs').textContent = 'Tabs';
@@ -615,6 +617,7 @@ function updateTabEditor() {
     if (multiple) $('#tab-width-status').textContent = selection.every(b => b.requestedWidth === bridge.requestedWidth) ? 'Width applies to all selected tabs.' : 'Mixed widths. Set a width to apply it to all selected tabs.';
     $('#inherit-tab-width').disabled = selection.every(b => b.widthOverride == null);
   }
+  $('#reset-outline').textContent = `Use Automatic Tabs for ${layerName(contour.regionId)}`;
   $('#reset-outline').disabled = !isCustom;
 }
 function addTab(contourId, position) {

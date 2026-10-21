@@ -28,10 +28,13 @@ async function check(name, action) {
   document.querySelector('#results').append(li);
 }
 function locked(cancelId, overlayId) {
-  assert(!$(overlayId).hidden, 'Preview overlay is missing');
-  assert(!$(cancelId).disabled && $(cancelId).getBoundingClientRect().height > 0, 'Cancel must remain usable');
-  assert([...d.querySelectorAll('button,input,select,textarea')].every(el => el.id === cancelId.slice(1) || el.disabled), 'A control remains enabled');
-  assert(d.activeElement === $(cancelId), 'Cancel should receive keyboard focus');
+  assert(d.querySelector('[aria-busy="true"]'), 'Work must lock immediately, before the delayed overlay');
+  assert(!$(cancelId).disabled, 'Cancel must remain enabled');
+  if (!$(overlayId).hidden) {
+    assert([...d.querySelectorAll('button,input,select,textarea')].every(el => el.id === cancelId.slice(1) || el.disabled), 'A control remains enabled');
+    assert($(cancelId).getBoundingClientRect().height > 0, 'Cancel must remain usable');
+    assert(d.activeElement === $(cancelId), 'Visible Cancel should receive keyboard focus');
+  }
 }
 await ready();
 await click('#edit-tabs');

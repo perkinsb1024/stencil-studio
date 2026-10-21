@@ -6,7 +6,7 @@ export function createBusyTask({ root, overlay, stage, onCancel, onError }) {
   progress.className = 'busy-progress';
   progress.max = 1;
   label.after(progress);
-  let job = null, controls = [], focus, focusSelector;
+  let job = null, controls = [], focus, focusSelector, showTimer;
   const disabledObserver = new MutationObserver(records => {
     for (const { target } of records) {
       if (job && target !== cancel && 'disabled' in target && !target.disabled) target.disabled = true;
@@ -17,6 +17,8 @@ export function createBusyTask({ root, overlay, stage, onCancel, onError }) {
     if (target && !target.disabled && target.getClientRects().length) target.focus({ preventScroll: true });
   }
   function unlock() {
+    clearTimeout(showTimer);
+    showTimer = null;
     disabledObserver.disconnect();
     overlay.hidden = true;
     stage.setAttribute('aria-busy', 'false');
@@ -36,14 +38,16 @@ export function createBusyTask({ root, overlay, stage, onCancel, onError }) {
     document.addEventListener(type, event => {
       if (!job) return;
       if (type === 'focusin') {
-        if (!cancel.contains(event.target)) cancel.focus({ preventScroll: true });
+        if (!overlay.hidden && !cancel.contains(event.target)) cancel.focus({ preventScroll: true });
         return;
       }
       if (event.type === 'keydown' && event.key === 'Escape') {
         event.preventDefault(); event.stopImmediatePropagation(); stop(); return;
       }
       if (type === 'keydown' && event.key === 'Tab') {
-        event.preventDefault(); cancel.focus({ preventScroll: true }); return;
+        event.preventDefault();
+        if (!overlay.hidden) cancel.focus({ preventScroll: true });
+        return;
       }
       if (cancel.contains(event.target) && !['wheel', 'drop', 'dragover'].includes(type)) return;
       event.preventDefault(); event.stopImmediatePropagation();
@@ -57,17 +61,22 @@ export function createBusyTask({ root, overlay, stage, onCancel, onError }) {
       const attributes = ['data-tab', 'data-outline', 'data-material-bridge', 'data-bridge-end', 'data-visibility-outline'];
       focusSelector = focus?.id ? `#${CSS.escape(focus.id)}` : attributes.filter(name => focus?.hasAttribute(name))
         .map(name => `[${name}="${CSS.escape(focus.getAttribute(name))}"]`).join('');
-      controls = [...document.querySelectorAll('button,input,select,textarea,fieldset')]
-        .filter(control => control !== cancel).map(control => [control, control.disabled]);
-      for (const [control] of controls) control.disabled = true;
       root.classList.add('is-busy'); stage.setAttribute('aria-busy', 'true');
       progress.removeAttribute('value');
       progress.setAttribute('aria-label', message);
-      label.textContent = message; overlay.hidden = false; cancel.focus({ preventScroll: true });
+      label.textContent = message;
       try {
         const worker = new Worker(new URL('./geometry-worker.js', import.meta.url), { type: 'module' });
         job = { worker };
-        disabledObserver.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['disabled'] });
+        showTimer = setTimeout(() => {
+          if (job?.worker !== worker) return;
+          controls = [...document.querySelectorAll('button,input,select,textarea,fieldset')]
+            .filter(control => control !== cancel).map(control => [control, control.disabled]);
+          for (const [control] of controls) control.disabled = true;
+          disabledObserver.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['disabled'] });
+          overlay.hidden = false;
+          cancel.focus({ preventScroll: true });
+        }, 300);
         const finish = (error, result) => {
           if (job?.worker !== worker) return;
           worker.terminate(); job = null; unlock();

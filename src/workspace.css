@@ -84,6 +84,12 @@ input[type=search],select,.field>input,.region-fields input[type=number]{min-hei
 select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='m1 1 5 5 5-5' fill='none' stroke='%23705c7f' stroke-width='1.5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:34px}
 input:disabled,select:disabled{background-color:#f3f1f5;color:#77717d}
 .stepper{display:flex;border:1px solid #cfc7d6;border-radius:6px;overflow:hidden;height:38px}.stepper button{width:32px;display:grid;place-items:center;background:#f7f4fa}.stepper .icon{width:13px;height:13px}.stepper input{width:36px;min-width:0;text-align:center;border:0;background:white;appearance:textfield}.stepper input::-webkit-inner-spin-button{appearance:none}
+.control:has(input:disabled) .control-label{color:#8b878e}
+input[type=range]:disabled{background:#dedde0;cursor:not-allowed}
+input[type=range]:disabled::-webkit-slider-thumb{background:#b8b5bc;border-color:#f3f2f4;box-shadow:0 0 0 1px #b8b5bc}
+input[type=range]:disabled::-moz-range-thumb{background:#b8b5bc;border-color:#f3f2f4;box-shadow:0 0 0 1px #b8b5bc}
+.stepper:has(input:disabled){border-color:#d8d6db;border-style:dashed;background:#eeedef}
+.stepper button:disabled,.stepper input:disabled{background:#eeedef;color:#a19da6;cursor:not-allowed}
 .field,.bridge-fields>label,.region-fields>label,.region-fields .control>label,.tab-pickers>label{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:500;margin:12px 0;min-width:0}
 .tab-edit-toolbar{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:16px 20px;flex-shrink:0;background:white;border-bottom:1px solid var(--line)}
 .tab-edit-toolbar button{min-height:56px;border:1px solid transparent;border-radius:6px;text-align:left;padding:8px 12px;font-size:13px;color:var(--muted)}
@@ -92,6 +98,7 @@ input:disabled,select:disabled{background-color:#f3f1f5;color:#77717d}
 .tab-edit-toolbar button:disabled{opacity:.45;cursor:not-allowed;background:transparent}
 .editing-panel{padding:20px 24px;min-width:0}.tab-inspector-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}.tab-inspector-heading>span{font-size:11px;color:var(--muted)}
 .panel-details{border-top:1px solid var(--line);margin-top:20px;padding-top:4px}.panel-details .small-button{margin:6px 0}.panel-details .check-label{margin:12px 0}
+#reset-outline,#reset-all-tabs{display:block;width:100%}
 .type-review-entry{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:16px 0}
 .type-review{border:1px solid #ccb7db;border-radius:var(--radius);padding:14px;background:#f9f6fc;margin-bottom:20px}
 #review-layer-name{font-size:14px}.review-types{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0}.review-types div{padding:10px;background:white;border:1px solid #e5ddea;border-radius:6px}.review-types dt{font-size:11px;color:var(--muted)}.review-types dd{margin:5px 0 0;font-size:13px;font-weight:600}
@@ -99,6 +106,8 @@ input:disabled,select:disabled{background-color:#f3f1f5;color:#77717d}
 .review-decisions{display:flex;flex-direction:column;gap:6px;margin-top:12px}.review-navigation{display:flex;justify-content:space-between;gap:8px}
 .layer-filters{display:grid;grid-template-columns:minmax(0,1fr) 124px;gap:6px;margin:12px 0}.layer-filters select{font-size:12px}
 .outline-actions,.region-actions{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0}
+#selected-tab-actions{flex-wrap:nowrap}
+#selected-tab-actions>button{flex:1 1 0;min-width:0}
 .outline-list,.ordered-list{max-height:440px;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;min-width:0;position:relative;padding:3px}
 .layer-card{position:relative;border:1px solid #ded7e5;border-radius:8px;background:white;margin:0 0 10px;padding:10px;min-width:0}.layer-card.selected{border-color:#9f7eb7;box-shadow:0 0 0 1px #9f7eb7;background:#fbf8fd}
 .layer-main{display:grid;grid-template-columns:20px minmax(0,1fr) 32px 22px;gap:5px;align-items:center}
