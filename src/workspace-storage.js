@@ -29,8 +29,14 @@ const validMaterial = value =>
 const validRegions = value => Array.isArray(value) && value.length <= 100 && new Set(value.map(r => r?.id)).size === value.length && value.every(r =>
   isObject(r) && isRegion(r.id) && (r.label === undefined || typeof r.label === 'string' && /^Region \d{1,6}$/.test(r.label)) && (r.contourId === null || isContour(r.contourId)) && Number.isFinite(r.width) && r.width >= 0.2 && r.width <= 12 && (r.taperLength === undefined || Number.isFinite(r.taperLength) && r.taperLength >= 0.1 && r.taperLength <= 50) && ['roundedTabs', 'roundedChannelCorners'].every(key => r[key] === undefined || typeof r[key] === 'boolean') && validPolygon(r.points));
 const ranges = { artworkWidth: [10, 1000], channelWidth: [0.2, 12], tabWidth: [0.5, 15], tabCount: [1, 24], tabOffset: [0, 100], margin: [0, 100] };
+function validObjectSettings(value) {
+  return value === undefined || isObject(value) && Object.keys(value).length <= 500 && Object.entries(value).every(([id, settings]) =>
+    isContour(id) && isObject(settings) && Object.entries(settings).every(([key, number]) =>
+      ['roundedTabs', 'roundedChannelCorners'].includes(key) ? typeof number === 'boolean' :
+      ['channelWidth', 'tabWidth', 'tabCount', 'tabOffset'].includes(key) && Number.isFinite(number) && number >= ranges[key][0] && number <= ranges[key][1] && (key !== 'tabCount' || Number.isInteger(number))));
+}
 function validSnapshot(value) {
-  return isObject(value) && validMaterial(value) && (value.measurements === undefined || validMeasurements(value.measurements)) && (value.source === undefined || typeof value.source === 'string' && value.source.length <= 3_000_000 && typeof value.name === 'string' && (value.example === undefined || typeof value.example === 'string')) && (value.regions === undefined || validRegions(value.regions)) && ['hiddenContours', 'cutawayContours'].every(key => value[key] === undefined || isContourList(value[key])) && isObject(value.settings) && Object.entries(ranges).every(([key, [min, max]]) =>
+  return isObject(value) && validObjectSettings(value.objectSettings) && validMaterial(value) && (value.measurements === undefined || validMeasurements(value.measurements)) && (value.source === undefined || typeof value.source === 'string' && value.source.length <= 3_000_000 && typeof value.name === 'string' && (value.example === undefined || typeof value.example === 'string')) && (value.regions === undefined || validRegions(value.regions)) && ['hiddenContours', 'cutawayContours'].every(key => value[key] === undefined || isContourList(value[key])) && isObject(value.settings) && Object.entries(ranges).every(([key, [min, max]]) =>
     Number.isFinite(value.settings[key]) && value.settings[key] >= min && value.settings[key] <= max) &&
     (value.settings.roundedTabs === undefined || typeof value.settings.roundedTabs === 'boolean') &&
     (value.settings.roundedChannelCorners === undefined || typeof value.settings.roundedChannelCorners === 'boolean') &&
@@ -44,6 +50,7 @@ export function readWorkspace(storage, key = workspaceKey) {
     if (!isObject(saved) || saved.version !== 1 || typeof saved.source !== 'string' || saved.source.length > 3_000_000 ||
       typeof saved.name !== 'string' || !validSnapshot(saved.document) || !isObject(saved.ui)) return null;
     const ui = saved.ui;
+    if (ui.tabSettingsScope !== undefined && !['defaults', 'object', 'tab'].includes(ui.tabSettingsScope)) return null;
     if (ui.measurements !== undefined && !validMeasurements(ui.measurements)) return null;
     if (ui.measureSnap !== undefined && !['free', 'auto', 'horizontal', 'vertical', 'diagonal'].includes(ui.measureSnap) &&
       !(isObject(ui.measureSnap) && ['axes', 'diagonal', 'objects'].every(key => typeof ui.measureSnap[key] === 'boolean'))) return null;

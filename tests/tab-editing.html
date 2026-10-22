@@ -25,6 +25,7 @@ async function check(name, action) {
 async function click(selector) { $(selector).click(); await settle(); }
 async function change(selector, value) { $(selector).value = value; $(selector).dispatchEvent(new w.Event('change', { bubbles: true })); await settle(); }
 async function placeTabOnSelectedOutline() {
+  await click('#tab-scope-object');
   await click('#add-tab');
   const path = [...d.querySelectorAll('.outline-hit-targets path')].find(p => p.dataset.outline === $('#outline-picker').value);
   const p = path.getPointAtLength(path.getTotalLength() * 0.11).matrixTransform($('#preview-svg').getScreenCTM());
@@ -75,7 +76,7 @@ await check('SVG stays the same size when toggling editing, placement, and outli
 await check('Removing an automatic tab freezes only its outline and can be undone/redone', async () => {
   await change('#tab-picker', 'auto-0'); await click('#remove-tab');
   assert(own().length === 3); assert($('#outline-mode').textContent === 'Custom');
-  assert($('#automatic-scope').textContent.includes('1 automatic outline'));
+  assert($('#object-tabCount').disabled && !$('#tabCount').disabled);
   assert(own().every(m => m.querySelector('circle') && !m.querySelector('rect')));
   await click('#undo'); assert(own().length === 4); assert($('#outline-mode').textContent === 'Automatic');
   await click('#redo'); assert(own().length === 3);
@@ -88,10 +89,10 @@ await check('Global count and offset do not move custom tabs', async () => {
 });
 await check('Added tabs inherit width; individual overrides survive default changes', async () => {
   await placeTabOnSelectedOutline(); assert(own().length === 4);
-  assert($('#tab-width-status').textContent.includes('Uses default'));
+  assert($('#tab-width-status').textContent.includes('Inherits'));
   await change('#selected-tab-width', 5); await change('#tabWidth', 4);
   assert($('#selected-tab-width').value === '5');
-  assert(own().filter(m => m.getAttribute('aria-label').includes('4.0 mm')).length === 3);
+  assert(own().filter(m => m.getAttribute('aria-label').includes('4 mm')).length === 3);
   await click('#inherit-tab-width'); assert($('#selected-tab-width').value === '4');
 });
 await check('Selected width slider updates live, stays in sync, and undoes the whole gesture', async () => {
@@ -100,13 +101,13 @@ await check('Selected width slider updates live, stays in sync, and undoes the w
     $('#selected-tab-width-range').value = value;
     $('#selected-tab-width-range').dispatchEvent(new w.Event('input')); await settle();
     assert(Number($('#selected-tab-width').value) === value);
-    assert(own().find(m => m.dataset.tab === id).getAttribute('aria-label').includes(`${value.toFixed(1)} mm`));
+    assert(own().find(m => m.dataset.tab === id).getAttribute('aria-label').includes(`${value} mm`));
   }
   $('#selected-tab-width-range').dispatchEvent(new w.Event('change')); await settle();
   assert($('#tabWidth').value === before, 'Global width changed');
   await click('#undo'); await change('#tab-picker', id);
   assert($('#selected-tab-width').value === before && $('#selected-tab-width-range').value === before);
-  assert($('#tab-width-status').textContent.includes('Uses default'), 'Width inheritance was not restored');
+  assert($('#tab-width-status').textContent.includes('Inherits'), 'Width inheritance was not restored');
   await click('#redo'); await change('#tab-picker', id); assert($('#selected-tab-width-range').value === '7');
   await click('#inherit-tab-width'); assert($('#selected-tab-width-range').value === before);
   await change('#selected-tab-width', 4.8); assert($('#selected-tab-width-range').value === '4.8');
@@ -134,12 +135,13 @@ await check('Numeric position changes only the selected tab and undo restores it
   await click('#undo'); const restored = own().find(m => m.dataset.tab === id);
   assert(JSON.stringify(point(restored)) === JSON.stringify(before));
 });
-await check('Add mode keeps placing tabs across outlines until cancelled, with readable active styling', async () => {
+await check('Add mode keeps placing tabs on the current object until cancelled, with readable active styling', async () => {
   const before = markers().length;
+  await click('#tab-scope-object');
   await click('#add-tab');
   const active = w.getComputedStyle($('#add-tab'));
   assert(active.color === 'rgb(255, 255, 255)' && active.backgroundColor === 'rgb(80, 44, 108)', 'Active button text has insufficient contrast');
-  for (const [index, fraction] of [[0, 0.31], [0, 0.44], [1, 0.62]]) {
+  for (const [index, fraction] of [[0, 0.31], [0, 0.44], [0, 0.62]]) {
     const path = d.querySelectorAll('.outline-hit-targets path')[index];
     const p = path.getPointAtLength(path.getTotalLength() * fraction).matrixTransform($('#preview-svg').getScreenCTM());
     pointer('pointermove', $('#preview-svg'), p); assert($('#tab-ghost'));
@@ -197,15 +199,16 @@ await check('A custom outline can have zero tabs; reset restores automatic layou
   await click('#reset-outline'); assert(own().length > 0); assert($('#outline-mode').textContent === 'Automatic');
   await click('#undo'); assert(own().length === 0); assert($('#outline-mode').textContent === 'Custom');
 });
-await check('Automatic controls disable when every outline is custom, and reset-all is undoable', async () => {
+await check('Defaults stay editable when every object is custom, and reset-all is undoable', async () => {
   await change('#outline-picker', 'outline-1'); await placeTabOnSelectedOutline();
-  assert($('#tabCount').disabled && $('#tabOffset').disabled);
+  assert(!$('#tabCount').disabled && !$('#tabOffset').disabled);
+  assert($('#object-tabCount').disabled);
   await click('#reset-all-tabs'); assert(!$('#tabCount').disabled); assert($('#reset-all-tabs').disabled);
-  await click('#undo'); assert($('#tabCount').disabled); assert(!$('#reset-all-tabs').disabled);
+  await click('#undo'); assert(!$('#tabCount').disabled); assert($('#object-tabCount').disabled); assert(!$('#reset-all-tabs').disabled);
 });
 await check('Changing the artwork clears edits and history without reusing outline edits', async () => {
   await click('[data-example="orbit"]'); await click('#edit-tabs'); assert(markers().length === 18); assert($('#undo').disabled && $('#redo').disabled);
-  assert($('#automatic-scope').textContent.includes('3 automatic outlines'));
+  assert($('#outline-mode').textContent === 'Automatic');
 });
 await check('Preview highlights never enter the exported cut SVG', async () => {
   let exported;
@@ -234,6 +237,7 @@ function selectAllTabs(allOutlines = true) {
 }
 await check('Dragging a tab follows its own path, syncs sliders, and undoes once', async () => {
   await click('[data-example="bloom"]');
+  await click('#edit-tabs');
   await change('#tab-picker', 'auto-0');
   const marker = own()[0], before = point(marker);
   const path = [...d.querySelectorAll('.outline-hit-targets path')].find(p => p.dataset.outline === marker.dataset.outline);
@@ -243,6 +247,7 @@ await check('Dragging a tab follows its own path, syncs sliders, and undoes once
   assert(Math.abs(Number($('#selected-tab-position').value) - 36) < 0.02);
   assert($('#selected-tab-position-range').value === $('#selected-tab-position').value);
   pointer('pointerup', $('#preview-svg'), screenPoint(target.x, target.y));
+  await settle();
   await click('#undo'); assert(JSON.stringify(point(own()[0])) === JSON.stringify(before));
   await click('#redo'); await change('#tab-picker', 'auto-0');
   assert(Math.abs(Number($('#selected-tab-position').value) - 36) < 0.02);
@@ -261,7 +266,7 @@ await check('Rectangle selection defaults to the outline chosen before dragging'
   assert(markers().filter(m => m.dataset.outline !== 'outline-1').every(m => m.getAttribute('aria-pressed') === 'false'));
   const otherLabels = markers().filter(m => m.dataset.outline !== 'outline-1').map(m => m.getAttribute('aria-label'));
   await change('#selected-tab-width', 6);
-  assert(own().every(m => m.getAttribute('aria-label').includes('6.0 mm')));
+  assert(own().every(m => m.getAttribute('aria-label').includes('6 mm')));
   assert(JSON.stringify(markers().filter(m => m.dataset.outline !== 'outline-1').map(m => m.getAttribute('aria-label'))) === JSON.stringify(otherLabels));
   await click('#undo');
 });
@@ -270,9 +275,9 @@ await check('Rectangle selection spans outlines and sets a shared width with one
   assert(markers().every(m => m.getAttribute('aria-pressed') === 'true'));
   assert($('#selected-outline-label').textContent === `${markers().length} Tabs Selected`);
   await change('#selected-tab-width', 5);
-  assert(markers().every(m => m.getAttribute('aria-label').includes('5.0 mm')));
-  await click('#undo'); assert(markers().some(m => !m.getAttribute('aria-label').includes('5.0 mm')));
-  await click('#redo'); assert(markers().every(m => m.getAttribute('aria-label').includes('5.0 mm')));
+  assert(markers().every(m => m.getAttribute('aria-label').includes('5 mm')));
+  await click('#undo'); assert(markers().some(m => !m.getAttribute('aria-label').includes('5 mm')));
+  await click('#redo'); assert(markers().every(m => m.getAttribute('aria-label').includes('5 mm')));
 });
 await check('Group position slider preserves relative positions across outlines through wraparound', async () => {
   selectAllTabs();
@@ -310,11 +315,13 @@ await check('Cancelled dragging restores layout and removes the rectangle', asyn
   pointer('pointerdown', marker, screenPoint(...point(marker)));
   pointer('pointermove', $('#preview-svg'), screenPoint(40, 40));
   pointer('pointercancel', $('#preview-svg'), screenPoint(40, 40));
+  await settle();
   assert(JSON.stringify(markers().map(point)) === JSON.stringify(before));
   const svg = $('#preview-svg');
   pointer('pointerdown', svg, screenPoint(1, 1));
   pointer('pointermove', svg, screenPoint(100, 100));
   pointer('pointercancel', svg, screenPoint(100, 100));
+  await settle();
   assert(!$('#tab-selection-box'));
 });
 await check('Dragging a selected group moves every tab and undoes in one step', async () => {
@@ -327,6 +334,7 @@ await check('Dragging a selected group moves every tab and undoes in one step', 
   pointer('pointermove', $('#preview-svg'), screenPoint(target.x, target.y));
   pointer('pointerup', $('#preview-svg'), screenPoint(target.x, target.y));
   assert(markers().every((m, i) => Math.hypot(point(m)[0] - before[i][0], point(m)[1] - before[i][1]) > 1), 'Some selected tabs stayed still');
+  await settle();
   await click('#undo'); assert(JSON.stringify(markers().map(point)) === JSON.stringify(before));
 });
 await check('Open-path group position stops at the endpoint without collapsing spacing', async () => {

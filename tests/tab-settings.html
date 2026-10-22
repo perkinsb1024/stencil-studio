@@ -1,0 +1,127 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Tab settings scope checks</title>
+<style>body{font:14px system-ui;padding:24px;color:#502c6c}li{margin:8px 0}.fail{color:#a00}iframe{width:1100px;height:1500px;border:1px solid #ddd}#summary{font-weight:bold}</style>
+<h1>Tab settings scope checks</h1><p id="summary">Running…</p><ol id="results"></ol><iframe title="Editor under test" src="about:blank"></iframe>
+<script type="module">
+import { previewReady } from './preview-ready.js';
+const frame = document.querySelector('iframe');
+localStorage.removeItem('stencil-studio.workspace.v1:tab-settings-tests');
+await new Promise(resolve => { frame.addEventListener('load', resolve, { once: true }); frame.src = '/?workspace=tab-settings-tests&live-reload=off'; });
+const d = frame.contentDocument, w = frame.contentWindow;
+// Virtual-time headless runs may suspend animation frames in an embedded frame.
+if (new URLSearchParams(location.search).has('headless')) {
+  w.requestAnimationFrame = callback => w.setTimeout(() => callback(w.performance.now()), 16);
+  w.cancelAnimationFrame = id => w.clearTimeout(id);
+}
+const $ = selector => d.querySelector(selector);
+const settle = async () => { await new Promise(resolve => setTimeout(resolve, 40)); await previewReady(d); };
+await settle();
+function assert(value, message = 'Unexpected result') { if (!value) throw new Error(message); }
+async function check(name, action) {
+  const li = document.createElement('li');
+  try { await action(); li.textContent = `PASS — ${name}`; }
+  catch (error) { li.textContent = `FAIL — ${name}: ${error.message}`; li.className = 'fail'; }
+  document.querySelector('#results').append(li);
+}
+async function click(selector) { $(selector).click(); await settle(); }
+async function change(selector, value) { $(selector).value = value; $(selector).dispatchEvent(new w.Event('change', { bubbles: true })); await settle(); }
+const markers = () => [...d.querySelectorAll('.tab-marker')];
+const own = () => markers().filter(m => m.dataset.outline === $('#outline-picker').value);
+const panel = scope => $(`#tab-${scope}-panel`);
+await click('#edit-tabs');
+await check('three scopes expose one panel and identify their target', async () => {
+  for (const scope of ['defaults', 'object', 'tab']) {
+    await click(`#tab-scope-${scope}`);
+    assert(!panel(scope).hidden);
+    assert([...d.querySelectorAll('.tab-scope-panel')].filter(p => !p.hidden).length === 1);
+    assert($(`#tab-scope-${scope}`).getAttribute('aria-selected') === 'true');
+    assert($('#tab-object-context').hidden === (scope === 'defaults'));
+  }
+  await click('#tab-scope-object');
+});
+await check('object count and width affect only the current object', async () => {
+  await change('#object-tabCount', 6);
+  assert(own().length === 6);
+  assert(markers().length === 10);
+  await change('#object-tabWidth', 5);
+  assert(own().every(m => m.getAttribute('aria-label').includes('5 mm')));
+  assert($('#object-tabWidth-status').textContent === 'Object override');
+  await change('#outline-picker', 'outline-1');
+  assert(own().length === 4);
+  assert($('#object-tabWidth').value === '3');
+  assert($('#object-tabWidth-status').textContent === 'Uses global default');
+});
+await check('global width passes through inherited objects and preserves overrides', async () => {
+  await click('#tab-scope-defaults');
+  await change('#tabWidth', 4);
+  assert(own().every(m => m.getAttribute('aria-label').includes('4 mm')));
+  await click('#tab-scope-object');
+  await change('#outline-picker', 'outline-0');
+  assert($('#object-tabWidth').value === '5');
+  assert(own().every(m => m.getAttribute('aria-label').includes('5 mm')));
+});
+await check('selecting a canvas tab opens Tab scope and individual width takes priority', async () => {
+  own()[0].dispatchEvent(new w.MouseEvent('click', { bubbles: true, detail: 0 }));
+  await settle();
+  assert(!panel('tab').hidden);
+  await change('#selected-tab-width', 7);
+  assert($('#tab-width-status').textContent.includes('Individual tab width'));
+  await click('#tab-scope-object');
+  await change('#object-tabWidth', 6);
+  assert(own().filter(m => m.getAttribute('aria-label').includes('7 mm')).length === 1);
+  assert(own().filter(m => m.getAttribute('aria-label').includes('6 mm')).length === 5);
+  assert($('#object-tabCount').disabled);
+  await click('#tab-scope-tab');
+  await click('#inherit-tab-width');
+  assert(own().every(m => m.getAttribute('aria-label').includes('6 mm')));
+  assert($('#tab-width-status').textContent.includes('this object'));
+});
+await check('object inheritance resets, undo, and automatic placement preserve scope', async () => {
+  await click('#tab-scope-object');
+  await click('[data-inherit-object="tabWidth"]');
+  assert(own().every(m => m.getAttribute('aria-label').includes('4 mm')));
+  await click('#undo');
+  assert($('#object-tabWidth').value === '6');
+  await click('#reset-outline');
+  assert(!$('#object-tabCount').disabled);
+  assert(own().length === 6);
+  await click('#inherit-object-settings');
+  assert($('#object-tabCount').value === '4');
+  assert(own().length === 4);
+  assert($('#object-tabWidth').value === '4');
+});
+await check('object channel shapes, widths and units retain physical settings', async () => {
+  await change('#object-channelWidth', 3);
+  await change('#object-roundedTabs', 'true');
+  await change('#object-roundedChannelCorners', 'false');
+  await click('[data-units="in"]');
+  assert(Math.abs(Number($('#object-channelWidth').value) - 3 / 25.4) < 0.0001);
+  await click('[data-units="mm"]');
+  assert($('#object-channelWidth').value === '3');
+  assert($('#object-roundedTabs').value === 'true');
+  assert($('#object-roundedChannelCorners').value === 'false');
+});
+await check('scope switch supports keyboard navigation', async () => {
+  $('#tab-scope-object').focus();
+  $('#tab-scope-object').dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  assert(!panel('tab').hidden);
+  assert(d.activeElement === $('#tab-scope-tab'));
+});
+await check('saved workspace restores scope and object settings', async () => {
+  w.dispatchEvent(new w.PageTransitionEvent('pagehide'));
+  const saved = JSON.parse(localStorage.getItem('stencil-studio.workspace.v1:tab-settings-tests'));
+  assert(saved.document.objectSettings['outline-0'].channelWidth === 3);
+  assert(saved.document.objectSettings['outline-0'].roundedTabs === true);
+  assert(saved.ui.tabSettingsScope === 'tab');
+  await new Promise(resolve => { frame.addEventListener('load', resolve, { once: true }); frame.contentWindow.location.reload(); });
+  // The document reference changes on reload.
+  for (let i = 0; i < 100; i++) {
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const next = frame.contentDocument;
+    if (next.querySelector('#object-channelWidth')?.value === '3' && next.querySelector('#preview-busy')?.hidden) break;
+  }
+  assert(frame.contentDocument.querySelector('#object-channelWidth').value === '3');
+  assert(!frame.contentDocument.querySelector('#tab-tab-panel').hidden);
+});
+const failures = document.querySelectorAll('.fail').length;
+document.querySelector('#summary').textContent = `${document.querySelectorAll('li:not(.fail)').length} passed; ${failures} failed.`;
+</script></html>

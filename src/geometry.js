@@ -96,7 +96,7 @@ export function generateStencil(contours, options, onProgress = () => {}) {
     const layout = tabLayouts[contourId];
     const channel = layoutChannel(contour, options, layout);
     const { tabs, pieces } = channel;
-    if (!layout) reducedTabs ||= tabs.length < tabCount || tabs.some(t => t.width < t.requestedWidth - 1e-7);
+    if (!layout) reducedTabs ||= tabs.length < (options.objectSettings?.[contourId]?.tabCount ?? tabCount) || tabs.some(t => t.width < t.requestedWidth - 1e-7);
     else {
       if (!tabs.length && closed) warnings.push(`Object ${index + 1} has no tabs; its inner piece may come loose.`);
       for (const tab of tabs) if (tab.width < tab.requestedWidth - 1e-7) {
@@ -113,7 +113,7 @@ export function generateStencil(contours, options, onProgress = () => {}) {
     for (const piece of pieces) ribbons.push(...channelPaths(piece.points, closed && !tabs.length, profile, {
       start: piece.start && profile.shapeAt(piece.points[0], 'roundedTabs'),
       end: piece.end && profile.shapeAt(piece.points.at(-1), 'roundedTabs'),
-    }, options.roundedChannelCorners !== false));
+    }, (options.objectSettings?.[contourId]?.roundedChannelCorners ?? options.roundedChannelCorners) !== false));
   }
   onProgress(0.7);
   const clipper = new ClipperLib.Clipper();

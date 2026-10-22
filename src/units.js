@@ -9,7 +9,7 @@ export function setLengthValue(input, value, state) {
 
 // Preserve physical limits when switching the presentation units.
 export function configureLengthControls(state) {
-  const ids = ['artworkWidth', 'artworkHeight', 'channelWidth', 'tabWidth', 'selected-tab-width', 'region-width', 'region-taper-length', 'bridge-width', 'minimum-material-width', 'selected-bridge-width'];
+  const ids = ['artworkWidth', 'artworkHeight', 'channelWidth', 'tabWidth', 'object-channelWidth', 'object-tabWidth', 'selected-tab-width', 'region-width', 'region-taper-length', 'bridge-width', 'minimum-material-width', 'selected-bridge-width'];
   for (const id of ids) {
     for (const input of [document.getElementById(id), document.getElementById(`${id}-range`)].filter(Boolean)) {
       for (const attr of ['min', 'max', 'step']) {

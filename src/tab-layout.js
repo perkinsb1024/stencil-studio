@@ -1,5 +1,8 @@
+import { objectSettings } from './object-settings.js';
+
 // Positions are fractions of contour length; widths are physical millimeters.
-export function automaticTabs(contour, { tabCount, tabWidth, channelWidth, tabOffset }) {
+export function automaticTabs(contour, options) {
+  const { tabCount, tabWidth, channelWidth, tabOffset } = objectSettings(options, contour.id);
   if (contour.length < 0.01) return [];
   const count = Math.min(tabCount, Math.max(1, Math.floor(contour.length / (tabWidth + channelWidth * 2))));
   return Array.from({ length: count }, (_, i) => ({
@@ -10,11 +13,12 @@ export function automaticTabs(contour, { tabCount, tabWidth, channelWidth, tabOf
 }
 
 export function resolveTabs(contour, options, layout) {
+  const inheritedWidth = objectSettings(options, contour.id).tabWidth;
   const custom = Array.isArray(layout);
   const tabs = custom ? layout : automaticTabs(contour, options);
   return tabs.map(tab => {
     const position = contour.closed ? (tab.position >= 0 && tab.position < 1 ? tab.position : ((tab.position % 1) + 1) % 1) : Math.max(0, Math.min(1, tab.position));
-    const requestedWidth = tab.widthOverride ?? options.tabWidth;
+    const requestedWidth = tab.widthOverride ?? inheritedWidth;
     // Keep room for channel cuts, including on very short custom outlines.
     const width = Math.min(requestedWidth, contour.length * 0.35 / tabs.length);
     const center = position * contour.length;

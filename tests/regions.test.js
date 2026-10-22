@@ -2,6 +2,23 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { scaleRegions, validPolygon, containsPoint, channelWidthAt, createChannelWidthProfile } from '../src/regions.js';
 const points = [{ x: 0.1, y: 0.2 }, { x: 0.4, y: 0.2 }, { x: 0.4, y: 0.5 }, { x: 0.1, y: 0.5 }];
+test('object channel settings inherit defaults and yield to regional overrides', () => {
+  const options = { channelWidth: 2, roundedTabs: false, roundedChannelCorners: true,
+    objectSettings: { 'outline-0': { channelWidth: 5, roundedTabs: true, roundedChannelCorners: false } },
+    regions: [{ points, width: 1, taperLength: 1, contourId: 'outline-0', roundedTabs: false, roundedChannelCorners: true }],
+  };
+  const own = createChannelWidthProfile('outline-0', options), other = createChannelWidthProfile('outline-1', options);
+  const outside = { x: -10, y: 0.3 }, inside = { x: 0.2, y: 0.3 };
+  assert.equal(own.widthAt(outside), 5);
+  assert.equal(own.shapeAt(outside, 'roundedTabs'), true);
+  assert.equal(own.shapeAt(outside, 'roundedChannelCorners'), false);
+  assert.equal(own.widthAt(inside), 1);
+  assert.equal(own.shapeAt(inside, 'roundedTabs'), false);
+  assert.equal(own.shapeAt(inside, 'roundedChannelCorners'), true);
+  assert.equal(other.widthAt(inside), 2);
+  assert.equal(other.shapeAt(inside, 'roundedTabs'), false);
+  assert.equal(other.shapeAt(inside, 'roundedChannelCorners'), true);
+});
 test('region vertices follow artwork resizing and padding while widths stay in millimeters', () => {
   const regions = [{ id: 'region-one', width: 0.8, taperLength: 12, contourId: null, points }];
   const original = structuredClone(regions);

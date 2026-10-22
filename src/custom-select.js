@@ -115,7 +115,7 @@ export function installCustomSelects(root, preview) {
       });
     }
     const { button } = control;
-    const text = select.selectedOptions[0]?.textContent ?? 'Select…';
+    const text = select.dataset.displayLabel ?? select.selectedOptions[0]?.textContent ?? 'Select…';
     if (button.textContent !== text) button.textContent = text;
     if (button.disabled !== select.disabled) button.disabled = select.disabled;
     const label = select.getAttribute('aria-label') || [...(select.labels ?? [])].map(label => label.childNodes[0]?.textContent.trim()).filter(Boolean).join(' ') || text;
@@ -128,7 +128,7 @@ export function installCustomSelects(root, preview) {
     if (opened && !opened.isConnected) close();
     root.querySelectorAll('select').forEach(sync);
   }
-  new MutationObserver(syncAll).observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['disabled', 'hidden'] });
+  new MutationObserver(syncAll).observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['disabled', 'hidden', 'data-display-label'] });
   document.addEventListener('pointerdown', event => {
     if (opened && !menu.contains(event.target) && event.target !== controls.get(opened).button) close();
   });

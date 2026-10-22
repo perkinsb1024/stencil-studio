@@ -7,6 +7,19 @@ const workspace = {
   ui: { view: 'cut', zoom: 1.25, showTabs: true, showOriginal: true, editing: true, adding: false, selectCurrentOutlineOnly: false, selectedContour: 'outline-0', selectedTab: 'auto-0', selectedTabs: [{ contourId: 'outline-0', id: 'auto-0' }] },
   history: { past: [document, document, document], future: [document] },
 };
+test('object settings and scope round trip with legacy history and reject invalid overrides', () => {
+  const store = storage();
+  const current = { ...document, objectSettings: { 'outline-0': { tabWidth: 5, tabCount: 6, tabOffset: 25, channelWidth: 3, roundedTabs: true, roundedChannelCorners: false } } };
+  const saved = { ...workspace, document: current, ui: { ...workspace.ui, tabSettingsScope: 'object' }, history: { past: [document, current], future: [current] } };
+  writeWorkspace(store, saved);
+  assert.deepEqual(readWorkspace(store), saved);
+  for (const objectSettings of [null, { 'shape-0': {} }, { 'outline-0': { tabCount: 2.5 } }, { 'outline-0': { channelWidth: 20 } }, { 'outline-0': { roundedTabs: 'true' } }, { 'outline-0': { unknown: 1 } }]) {
+    for (const change of [{ document: { ...current, objectSettings } }, { history: { past: [{ ...current, objectSettings }], future: [] } }]) {
+      store.setItem(workspaceKey, JSON.stringify({ ...saved, ...change }));
+      assert.equal(readWorkspace(store), null);
+    }
+  }
+});
 test('material regions, bridges, exclusions and bridge editor recover alongside legacy history', () => {
   const store = storage();
   const material = { ...document, materialVersion: 1, materialTreatments: { 'shape-0': 'cut', 'shape-1': 'keep' }, materialOrder: ['shape-1', 'shape-0'], regionBridges: [{ id: 'bridge-test', a: { x: 0.4, y: -0.05 }, b: { x: 0.5, y: 0.4 }, width: 3, automatic: false }], bridgeExclusions: ['0.4,0.1:0.5,0.2'], bridgeWidth: 3, minimumMaterialWidth: 0.5, bridgeReinforcement: true, bridgeSnapLines: false };

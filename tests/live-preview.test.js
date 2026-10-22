@@ -30,6 +30,17 @@ test('live widths and tab positions change without touching the final geometry o
   assert.deepEqual(state, before);
 });
 
+test('live preview respects object overrides and individual tab width inheritance', () => {
+  const state = fixture();
+  state.objectSettings = { 'outline-0': { channelWidth: 5, tabWidth: 7, tabCount: 2, roundedTabs: true } };
+  const preview = livePreviewMarkup(state, 0.5);
+  assert.equal(preview.tabs.length, 2);
+  assert.equal(preview.tabs[0].requestedWidth, 7);
+  assert.equal(preview.tabs[0].channelWidth, 5);
+  state.tabLayouts = { 'outline-0': [{ id: 'tab-inherited', position: 0.1, widthOverride: null }, { id: 'tab-own', position: 0.6, widthOverride: 9 }] };
+  assert.deepEqual(livePreviewMarkup(state, 0.5).tabs.map(t => t.requestedWidth), [7, 9]);
+});
+
 test('regional width and taper previews sample the current region without polygon offsets', () => {
   const state = fixture();
   state.regions = [{ id: 'region-0', contourId: 'outline-0', points: [{ x: 0.3, y: -0.1 }, { x: 0.7, y: -0.1 }, { x: 0.7, y: 0.2 }, { x: 0.3, y: 0.2 }], width: 6, taperLength: 5 }];

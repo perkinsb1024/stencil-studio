@@ -16,7 +16,7 @@ self.onmessage = ({ data }) => {
     else if (task === 'snap') result = snapRegionBridge(data.contours, data.channelCuts, settings, data.bridge);
     else {
       reportProgress(0);
-      const padding = Math.max(settings.margin, Math.max(settings.channelWidth, ...settings.regions.map(r => r.width)) / 2 + 2);
+      const padding = Math.max(settings.margin, Math.max(settings.channelWidth, ...Object.values(settings.objectSettings ?? {}).map(s => s.channelWidth ?? 0), ...settings.regions.map(r => r.width)) / 2 + 2);
       const scaled = { ...scaleArtwork(artwork, settings.artworkWidth, padding), padding, regions: scaleRegions(settings.regions, settings.artworkWidth, padding) };
       let suggestions;
       const options = () => ({ ...settings, padding, sheet: scaled, regions: scaled.regions, regionBridges: scaleBridges(settings.regionBridges, settings.artworkWidth, padding) });

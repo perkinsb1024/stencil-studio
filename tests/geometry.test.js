@@ -11,6 +11,29 @@ const options = { channelWidth: 2, tabWidth: 4, tabCount: 4, tabOffset: 0 };
 const square = measureContour([{ x: 10, y: 10 }, { x: 110, y: 10 }, { x: 110, y: 110 }, { x: 10, y: 110 }], true);
 const insideCuts = (result, p) => result.paths.reduce((v, poly) => v ^ (ClipperLib.Clipper.PointInPolygon({ X: Math.round(p.x * 10000), Y: Math.round(p.y * 10000) }, poly.map(v => ({ X: Math.round(v.x * 10000), Y: Math.round(v.y * 10000) }))) !== 0), 0);
 
+test('object settings isolate count, position and width while individual widths take priority', () => {
+  const first = { ...square, id: 'outline-0' };
+  const second = { ...measureContour(square.points.map(p => ({ x: p.x + 200, y: p.y })), true), id: 'outline-1' };
+  const settings = { ...options, objectSettings: { 'outline-0': { tabCount: 2, tabOffset: 25, tabWidth: 7, channelWidth: 5 } } };
+  const result = generateStencil([first, second], settings);
+  const own = result.bridges.filter(b => b.contourId === first.id), other = result.bridges.filter(b => b.contourId === second.id);
+  assert.equal(own.length, 2);
+  assert.equal(own[0].position, 0.375);
+  assert.equal(own[0].requestedWidth, 7);
+  assert.equal(own[0].channelWidth, 5);
+  assert.equal(other.length, 4);
+  assert.equal(other[0].requestedWidth, 4);
+  assert.equal(other[0].channelWidth, 2);
+  settings.tabLayouts = { 'outline-0': [{ id: 'tab-inherit', position: 0.1, widthOverride: null }, { id: 'tab-own', position: 0.6, widthOverride: 9 }] };
+  settings.tabWidth = 6;
+  let custom = generateStencil([first], settings).bridges;
+  assert.deepEqual(custom.map(b => b.requestedWidth), [7, 9]);
+  delete settings.objectSettings['outline-0'].tabWidth;
+  custom = generateStencil([first], settings).bridges;
+  assert.deepEqual(custom.map(b => b.requestedWidth), [6, 9]);
+  assert.deepEqual(custom.map(b => b.position), [0.1, 0.6]);
+});
+
 test('square channels have the specified width and four intact bridges', () => {
   const result = generateStencil([square], options);
   assert.equal(result.paths.length, 4);

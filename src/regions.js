@@ -1,3 +1,5 @@
+import { objectSettings } from './object-settings.js';
+
 // Region vertices use artwork-width units on both axes, so they follow artwork
 // resizing and stay independent of sheet padding. Widths and tapers remain millimeters.
 export function scaleRegions(regions, width, padding) {
@@ -47,6 +49,7 @@ function distanceToBoundary(points, point) {
 }
 
 export function createChannelWidthProfile(contourId, options) {
+  options = objectSettings(options, contourId);
   const previousWidths = [options.channelWidth];
   const regions = (options.regions ?? []).filter(r => r.contourId === null || r.contourId === contourId).map(region => {
     // Keep the exact requested width throughout the region. Blend outward over
