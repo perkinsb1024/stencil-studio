@@ -73,31 +73,31 @@ select[hidden]{display:none!important}
 .canvas-viewport:has(.dragging-object),.dragging-object,.dragging-object *{cursor:grabbing!important}
 .bridge-highlight{fill:var(--bridge-color);fill-opacity:.09;stroke:var(--bridge-color);stroke-width:calc(var(--bridge-handle-unit) * .8);stroke-linejoin:round;pointer-events:none}
 .region-bridge.selected .bridge-highlight{fill-opacity:.16;stroke-width:calc(var(--bridge-handle-unit) * 1.6)}
-.bridge-hit{fill:transparent;stroke:none;pointer-events:all;cursor:grab}
-.bridge-hit:active{cursor:grabbing}
+.bridge-hit{fill:transparent;stroke:none;pointer-events:all}
 .bridge-control-guide{fill:none;stroke:var(--bridge-color);stroke-width:calc(var(--bridge-handle-unit) * .75);stroke-dasharray:calc(var(--bridge-handle-unit) * 3) calc(var(--bridge-handle-unit) * 3);opacity:.5}
-.bridge-handle-hit{fill:transparent;stroke:none;pointer-events:all;cursor:grab}
+.bridge-handle-hit{fill:transparent;stroke:none;pointer-events:all}
 .bridge-handle{fill:var(--bridge-color);stroke:#f5f8fc;stroke-width:calc(var(--bridge-handle-unit) * .75);pointer-events:none}
 .bridge-handle-feedback{visibility:hidden;pointer-events:none;fill:none}
 .bridge-handle-feedback circle{stroke:var(--bridge-color);stroke-width:calc(var(--bridge-handle-unit) * 1.5)}
 .bridge-handle-feedback circle:first-child{stroke:#fffef9;stroke-width:calc(var(--bridge-handle-unit) * 4)}
 .region-bridge [tabindex]:focus{outline:none}
-.region-bridge:has(:focus-visible) .bridge-highlight{fill-opacity:.22;stroke-width:calc(var(--bridge-handle-unit) * 2)}
+.canvas-viewport:not(.pan-ready,.is-panning,.measuring) .editing-bridges:not(.adding-bridge) :is(.bridge-hit,.bridge-handle-hit){cursor:grab}
+.canvas-viewport:not(.pan-ready,.is-panning,.measuring) .editing-bridges:not(.adding-bridge) :is(.bridge-hit,.bridge-handle-hit):active{cursor:grabbing}
+.canvas-viewport:not(.pan-ready,.is-panning,.measuring) .editing-bridges:not(.adding-bridge) .region-bridge:has(:focus-visible) .bridge-highlight{fill-opacity:.22;stroke-width:calc(var(--bridge-handle-unit) * 2)}
 /* Highlight the actual drag target, rather than its entire parent group. */
-.region-bridge:has(>.bridge-hit:hover) .bridge-highlight{fill-opacity:.24;stroke-width:calc(var(--bridge-handle-unit) * 2.4)}
-.bridge-handle-hit:hover+.bridge-handle,.bridge-handle-hit:focus-visible+.bridge-handle{fill:color-mix(in srgb,var(--bridge-color) 80%,#203040);stroke:#fffef9}
-.bridge-handle-hit:hover+.bridge-handle+.bridge-handle-feedback,.bridge-handle-hit:focus-visible+.bridge-handle+.bridge-handle-feedback{visibility:visible}
-.region-bridge circle:active{cursor:grabbing}
+.canvas-viewport:not(.pan-ready,.is-panning,.measuring) .editing-bridges:not(.adding-bridge) .region-bridge:has(>.bridge-hit:hover) .bridge-highlight{fill-opacity:.24;stroke-width:calc(var(--bridge-handle-unit) * 2.4)}
+.canvas-viewport:not(.pan-ready,.is-panning,.measuring) .editing-bridges:not(.adding-bridge) .bridge-handle-hit:is(:hover,:focus-visible)+.bridge-handle{fill:color-mix(in srgb,var(--bridge-color) 80%,#203040);stroke:#fffef9}
+.canvas-viewport:not(.pan-ready,.is-panning,.measuring) .editing-bridges:not(.adding-bridge) .bridge-handle-hit:is(:hover,:focus-visible)+.bridge-handle+.bridge-handle-feedback{visibility:visible}
 .unsupported-material{fill:#e59338;fill-opacity:.18;stroke:#c66e28;stroke-width:.35;stroke-dasharray:1 1}
 .editing-bridges{touch-action:none}
 #preview-svg{overflow:hidden}
 .adding-bridge,.adding-bridge *{cursor:crosshair}
 .visibility-outline:focus{outline:none}
-.editing-outlines .visibility-outline{cursor:pointer}
+.canvas-viewport:not(.pan-ready,.is-panning,.measuring) .editing-outlines .visibility-outline{cursor:pointer}
 .outline-guide{stroke:#88739b;stroke-width:1.4;opacity:.65}
 .is-hidden .outline-guide{stroke:#978b9f;stroke-dasharray:4 4;opacity:.6}
 .visibility-outline.selected .outline-guide{stroke:#ff2da6;stroke-width:2.5;opacity:1}
-.visibility-outline:focus-visible .outline-guide{stroke:#258477;stroke-width:2.5;opacity:1}
+.canvas-viewport:not(.pan-ready,.is-panning,.measuring) .editing-outlines .visibility-outline:focus-visible .outline-guide{stroke:#258477;stroke-width:2.5;opacity:1}
 .tab-markers{pointer-events:none}
 .live-preview-active>.cut-shape,.live-preview-active .bridge-highlight,.live-preview-active .unsupported-material{visibility:hidden}
 .live-size-guide{position:absolute;top:12px;left:12px;z-index:3;display:flex;flex-direction:column;gap:10px;max-width:calc(100% - 24px);padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:#fffef9ed;box-shadow:0 2px 8px #3020390d;pointer-events:none;font-size:11px;color:var(--muted)}
@@ -106,24 +106,28 @@ select[hidden]{display:none!important}
 .tab-selection-ring{stroke:#ff2da6;stroke-width:calc(var(--tab-handle-unit) * 2)}
 .editing-tabs{touch-action:none}
 .editing-tabs .tab-markers{pointer-events:auto}
-.editing-tabs .tab-marker{cursor:grab;outline:none}
-.editing-tabs .tab-marker:active{cursor:grabbing}
-.editing-tabs .tab-marker:focus-visible>path{stroke:#502c6c;opacity:1}
-.editing-tabs:not(.adding-tab) .tab-marker:hover>path{stroke:color-mix(in srgb,var(--tab-color) 75%,#000);opacity:.65}
-.outline-hit-targets>path{cursor:pointer;pointer-events:stroke}
+.editing-tabs .tab-marker{outline:none}
+.canvas-viewport:not(.pan-ready,.is-panning,.measuring) .editing-tabs:not(.adding-tab) .tab-marker{cursor:grab}
+.canvas-viewport:not(.pan-ready,.is-panning,.measuring) .editing-tabs:not(.adding-tab) .tab-marker:active{cursor:grabbing}
+.canvas-viewport:not(.pan-ready,.is-panning,.measuring) .editing-tabs:not(.adding-tab) .tab-marker:focus-visible>path{stroke:#502c6c;opacity:1}
+.canvas-viewport:not(.pan-ready,.is-panning,.measuring) .editing-tabs:not(.adding-tab) .tab-marker:hover>path{stroke:color-mix(in srgb,var(--tab-color) 75%,#000);opacity:.65}
+.outline-hit-targets>path{pointer-events:stroke}
+.canvas-viewport:not(.pan-ready,.is-panning,.measuring) .editing-tabs:not(.adding-tab) .outline-hit-targets>path{cursor:pointer}
 .adding-tab,.adding-tab .tab-marker,.adding-tab .outline-hit-targets>path{cursor:crosshair}
 #tab-selection-box,#bridge-selection-box{fill:#258477;fill-opacity:0.12;stroke:#258477;stroke-width:1;stroke-dasharray:4 3;vector-effect:non-scaling-stroke;pointer-events:none}
 #bridge-selection-box{fill:var(--bridge-automatic);stroke:var(--bridge-automatic)}
 .selection-margin-overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:hidden}
 .selection-margin-box{fill:#888;fill-opacity:.06;stroke:#99949e;stroke-width:1;stroke-dasharray:4 3;vector-effect:non-scaling-stroke}
-.width-region path{fill:#218c83;fill-opacity:.08;stroke:#258477;stroke-width:1.5;stroke-dasharray:5 3;cursor:grab}
+.width-region path{fill:#218c83;fill-opacity:.08;stroke:#258477;stroke-width:1.5;stroke-dasharray:5 3}
 .width-region.selected path{fill-opacity:.14;stroke:#117569;stroke-width:2;stroke-dasharray:none}
 .width-region text{fill:#176c63;paint-order:stroke;stroke:#fffef9;stroke-width:.6;stroke-linejoin:round}
-.width-region circle{fill:#fffef9;stroke:#117569;stroke-width:2;cursor:grab}
-.width-region circle:active{cursor:grabbing}
-.width-region [tabindex]:focus-visible{outline:none;stroke:#ff2da6;stroke-width:3}
-.width-region>path:hover{fill-opacity:.24;stroke:#ff2da6;stroke-width:3}
-.width-region circle:hover,.width-region circle:focus-visible{fill:#ff2da6;stroke:#502c6c;stroke-width:3}
+.width-region circle{fill:#fffef9;stroke:#117569;stroke-width:2}
+.width-region [tabindex]:focus{outline:none}
+.canvas-viewport:not(.pan-ready,.is-panning,.measuring) .editing-regions:not(.drawing-region,.picking-region-layer) .width-region :is(path,circle){cursor:grab}
+.canvas-viewport:not(.pan-ready,.is-panning,.measuring) .editing-regions:not(.drawing-region,.picking-region-layer) .width-region circle:active{cursor:grabbing}
+.canvas-viewport:not(.pan-ready,.is-panning,.measuring) .editing-regions:not(.drawing-region,.picking-region-layer) .width-region [tabindex]:focus-visible{stroke:#ff2da6;stroke-width:3}
+.canvas-viewport:not(.pan-ready,.is-panning,.measuring) .editing-regions:not(.drawing-region,.picking-region-layer) .width-region>path:hover{fill-opacity:.24;stroke:#ff2da6;stroke-width:3}
+.canvas-viewport:not(.pan-ready,.is-panning,.measuring) .editing-regions:not(.drawing-region,.picking-region-layer) .width-region circle:is(:hover,:focus-visible){fill:#ff2da6;stroke:#502c6c;stroke-width:3}
 .region-draft path{fill:#218c83;fill-opacity:.1;stroke:#258477;stroke-width:1.5;stroke-dasharray:5 3}
 .region-draft circle{fill:#fffef9;stroke:#258477;stroke-width:2}
 .drawing-region,.drawing-region .width-region path{cursor:crosshair}
@@ -132,7 +136,7 @@ select[hidden]{display:none!important}
 .picking-region-layer .width-region,.picking-region-layer .region-draft,.picking-region-layer .tab-markers{pointer-events:none}
 .region-layer-guide{fill:none;stroke:#258477;stroke-width:1.5;stroke-dasharray:4 3;pointer-events:none;opacity:.65}
 .region-layer-hit{fill:none;stroke:transparent;pointer-events:stroke}
-.region-layer-target.hovered .region-layer-guide,.region-layer-target:focus-visible .region-layer-guide{stroke:#ff2da6;stroke-width:3;stroke-dasharray:none;opacity:1}
+.canvas-viewport:not(.pan-ready,.is-panning,.measuring) .picking-region-layer .region-layer-target:is(.hovered,:focus-visible) .region-layer-guide{stroke:#ff2da6;stroke-width:3;stroke-dasharray:none;opacity:1}
 .region-layer-target:focus-visible{outline:none}
 .drawing-region>*{pointer-events:none}
 
