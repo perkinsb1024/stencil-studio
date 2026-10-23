@@ -52,7 +52,6 @@ export function createRegionEditor({ state, render, preview, mutate, snapshot, r
     if (region) readRegionControls(region);
     const channelContours = state.artwork.contours.filter(c => materialMode(c, state) === 'outline');
     if (state.regionScope !== 'all' && !channelContours.some(c => c.id === state.regionScope)) state.regionScope = channelContours[0]?.id ?? 'all';
-    $('#edit-regions').textContent = 'Override Regions';
     $('#edit-regions').setAttribute('aria-pressed', state.editingRegions);
     $('#edit-regions').setAttribute('aria-expanded', state.editingRegions);
     $('#region-inspector').hidden = !state.editingRegions;

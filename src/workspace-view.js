@@ -31,11 +31,11 @@ export function workspaceView(icon, bridgePanel) {
           </section>
           <section id="shape-step" hidden>
             <div class="control-section size-section"><div class="section-heading"><h1>Shape Your Stencil</h1><button class="small-button" popovertarget="stencil-settings">Stencil Settings</button></div></div>
-            <div class="tab-edit-toolbar" role="group" aria-label="Editing Tool">
-              <button id="edit-outlines" data-description="Choose which shapes to cut or keep" aria-pressed="false" aria-controls="outline-inspector">Objects</button>
-              <button id="edit-tabs" data-description="Leave gaps that hold cut pieces in place" aria-pressed="false" aria-controls="tab-inspector">Tabs</button>
-              <button id="edit-bridges" data-description="Join separate pieces of retained material" aria-pressed="false" aria-controls="bridge-inspector">Bridges</button>
-              <button id="edit-regions" data-description="Change widths and styles in a selected area" aria-pressed="false" aria-controls="region-inspector">Override Regions</button>
+            <div class="tab-edit-toolbar" role="group" aria-label="Stencil Editing Tools">
+              <button id="edit-outlines" data-description="Choose which shapes to cut or keep" aria-pressed="false" aria-controls="outline-inspector"><span class="tool-title">Objects</span></button>
+              <button id="edit-tabs" data-description="Leave gaps along Outline paths" aria-pressed="false" aria-controls="tab-inspector"><span class="tool-title">Tabs</span></button>
+              <button id="edit-bridges" data-description="Connect material across cut areas" aria-pressed="false" aria-controls="bridge-inspector"><span class="tool-title">Bridges <span id="bridge-tool-status" class="tool-status" hidden></span></span></button>
+              <button id="edit-regions" data-description="Adjust widths and styles in an area" aria-pressed="false" aria-controls="region-inspector"><span class="tool-title">Override Regions <span class="tool-status">Optional</span></span></button>
             </div>
             <button id="toggle-controls" class="text-button mobile-only" aria-expanded="true">Inspect Canvas</button>
             <div id="tool-controls">

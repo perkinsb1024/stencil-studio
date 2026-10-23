@@ -1,13 +1,14 @@
 const distance = (a, b) => Math.hypot(b.x - a.x, b.y - a.y);
 
-// Rotate near a 45-degree increment, keeping the opposite endpoint fixed for
+// Rotate near an enabled axis or diagonal, keeping the opposite endpoint fixed for
 // handle drags or the center fixed for whole-bridge drags. Preserve length.
-export function snapBridgeToAngles(bridge, end = null) {
+export function snapBridgeToAngles(bridge, end = null, { axes = true, diagonal = true } = {}) {
   if (bridge.control || end === 'control') return bridge;
   const dx = bridge.b.x - bridge.a.x, dy = bridge.b.y - bridge.a.y;
   const length = Math.hypot(dx, dy);
   if (length < 0.0001) return bridge;
-  const angle = Math.atan2(dy, dx), snapped = Math.round(angle / (Math.PI / 4)) * Math.PI / 4;
+  const angle = Math.atan2(dy, dx), step = Math.round(angle / (Math.PI / 4)), snapped = step * Math.PI / 4;
+  if (step % 2 === 0 ? !axes : !diagonal) return bridge;
   if (Math.abs(angle - snapped) > 5 * Math.PI / 180) return bridge;
   const x = Math.cos(snapped) * length, y = Math.sin(snapped) * length;
   if (end === 'a') return { ...bridge, a: { x: bridge.b.x - x, y: bridge.b.y - y } };

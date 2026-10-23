@@ -26,6 +26,20 @@ test('whole bridge angle snapping preserves its center', () => {
   near(Math.hypot(snapped.b.x - snapped.a.x, snapped.b.y - snapped.a.y), Math.sqrt(100.25));
 });
 
+test('axis and diagonal snaps can be enabled independently in every direction', () => {
+  for (const axes of [false, true]) for (const diagonal of [false, true]) {
+    for (let step = -4; step < 4; step++) for (const end of [null, 'a', 'b']) {
+      const angle = step * Math.PI / 4 + 0.05;
+      const bridge = { a: { x: 20, y: 20 }, b: { x: 20 + 10 * Math.cos(angle), y: 20 + 10 * Math.sin(angle) }, width: 3 };
+      const snapped = snapBridgeToAngles(bridge, end, { axes, diagonal });
+      if (step % 2 === 0 ? axes : diagonal) {
+        near(snapped.b.x - snapped.a.x, 10 * Math.cos(step * Math.PI / 4));
+        near(snapped.b.y - snapped.a.y, 10 * Math.sin(step * Math.PI / 4));
+      } else assert.equal(snapped, bridge);
+    }
+  }
+});
+
 test('angle snapping ignores curves, bend handles, zero length, and angles outside tolerance', () => {
   const bridge = { a: { x: 0, y: 0 }, b: { x: 10, y: 4 } };
   assert.equal(snapBridgeToAngles(bridge), bridge);

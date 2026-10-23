@@ -47,7 +47,8 @@ const defaults = { artworkWidth: 150, channelWidth: 1.5, tabWidth: 3, tabCount: 
 const state = { ...defaults, units: 'mm', showGrid: false, gridSpacing: 25.4, artwork: null, source: null, example: '', name: 'Bloom.svg', view: 'material', showTabs: true, showOriginal: false, zoom: 1, panX: 0, panY: 0, sourceWarnings: [], result: null, scaled: null, tabLayouts: {}, objectSettings: {}, tabSettingsScope: 'object', hiddenContours: [], cutawayContours: [], regions: [], editingRegions: false, selectedRegion: null, drawingRegion: false, regionDraft: [], regionWidth: 0.8, regionTaperLength: 5, regionRoundedTabs: 'inherit', regionRoundedChannelCorners: 'inherit', regionScope: 'outline-0', editingOutlines: false, selectedOutlines: [], showHiddenOutlines: true, editing: false, adding: false, selectedContour: null, selectedTab: null, selectedTabs: [], selectCurrentOutlineOnly: true };
 const $ = s => document.querySelector(s);
 const htmlText = text => String(text).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
-const materialDefaults = () => ({ ...suggestionDefaults(), areaDecisions: {}, areaSuggestionBasis: null, materialVersion: 1, materialTreatments: {}, materialOrder: [], regionBridges: [], bridgeExclusions: [], bridgeWidth: 3, minimumMaterialWidth: 0.5, bridgeReinforcement: false, bridgeMatchFeatures: true, bridgeSnapLines: true, bridgeSnapAngles: true });
+// Older sessions used one preference for both axis and diagonal snapping.
+const materialDefaults = (saved = {}) => ({ ...suggestionDefaults(), areaDecisions: {}, areaSuggestionBasis: null, materialVersion: 1, materialTreatments: {}, materialOrder: [], regionBridges: [], bridgeExclusions: [], bridgeWidth: 3, minimumMaterialWidth: 0.5, bridgeReinforcement: false, bridgeMatchFeatures: true, bridgeSnapLines: true, bridgeSnapAngles: true, bridgeSnapDiagonal: saved.bridgeSnapAngles ?? true });
 Object.assign(state, { workflowStep: 1, activeTool: 'layers', showBridges: true, reviewingTypes: false, reviewRegion: null, layerQuery: '', layerFilter: 'all', controlsCollapsed: false, sourceChosen: false, areaDecisions: {} }, materialDefaults(), { editingBridges: false, selectedRegionBridge: null, selectedRegionBridges: [] });
 const outlineThumbnails = new WeakMap();
 const outlineBounds = new WeakMap();
@@ -394,7 +395,6 @@ function updateOutlineSelection() {
   else { updateOutlineSelectionControls(); updateOutlineSelectionHighlights(); }
 }
 function updateOutlineEditor() {
-  $('#edit-outlines').textContent = 'Objects';
   $('#edit-outlines').setAttribute('aria-pressed', state.editingOutlines);
   $('#outline-inspector').hidden = !state.editingOutlines;
   const groups = [...new Set([...state.materialOrder, ...state.artwork.contours.map(c => c.regionId)])].filter(id => state.artwork.contours.some(c => c.regionId === id)).reverse();
@@ -604,7 +604,6 @@ function updateTabEditor() {
   for (const id of ['tabCount', 'tabOffset', 'tabs-minus', 'tabs-plus']) $(`#${id}`).disabled = false;
   $('#reset-all-tabs').disabled = Object.keys(state.tabLayouts).length === 0;
   updateTabScope();
-  $('#edit-tabs').textContent = 'Tabs';
   $('#edit-tabs').setAttribute('aria-pressed', state.editing);
   $('#edit-tabs').setAttribute('aria-expanded', state.editing);
   $('#edit-tabs').disabled = !toolAvailable('tabs');
@@ -1318,7 +1317,7 @@ function restore(saved) {
   state.objectSettings = structuredClone(saved.objectSettings ?? {});
   state.hiddenContours = [...(saved.hiddenContours ?? [])];
   state.cutawayContours = [...(saved.cutawayContours ?? [])];
-  for (const [key, value] of Object.entries(materialDefaults())) state[key] = structuredClone(saved[key] ?? value);
+  for (const [key, value] of Object.entries(materialDefaults(saved))) state[key] = structuredClone(saved[key] ?? value);
   preserveLegacyAreaChoices(saved);
   state.selectedRegionBridge = null; state.selectedRegionBridges = [];
   state.regions = structuredClone(saved.regions ?? []).map((region, index) => ({ ...region, label: region.label ?? `Region ${index + 1}` }));
@@ -1556,7 +1555,7 @@ function restoreWorkspace() {
     state.hiddenContours = (saved.document.hiddenContours ?? []).filter(id => contourIds.has(id));
     state.regions = structuredClone(saved.document.regions ?? []).map((region, index) => ({ ...region, label: region.label ?? `Region ${index + 1}` }));
     state.cutawayContours = (saved.document.cutawayContours ?? []).filter(id => artwork.contours.some(c => c.id === id && c.closed));
-    for (const [key, value] of Object.entries(materialDefaults())) state[key] = structuredClone(saved.document[key] ?? value);
+    for (const [key, value] of Object.entries(materialDefaults(saved.document))) state[key] = structuredClone(saved.document[key] ?? value);
     preserveLegacyAreaChoices(saved.document);
     state.workflowStep = saved.ui.workflowStep ?? 2;
     state.activeTool = saved.ui.activeTool ?? (saved.ui.editing ? 'tabs' : saved.ui.editingRegions ? 'regions' : saved.ui.editingBridges ? 'bridges' : 'layers');
