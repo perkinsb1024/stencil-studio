@@ -7,7 +7,7 @@ import { moveBefore, moveByAction } from '../src/ordered-list.js';
 const context = { module: { exports: {} }, navigator: { userAgent: 'node' } };
 vm.runInNewContext(readFileSync(new URL('../vendor/clipper.js', import.meta.url), 'utf8'), context);
 globalThis.ClipperLib = context.module.exports;
-const { decideLayerType, pendingTypeReviews } = await import('../src/type-review.js');
+const { decideLayerType, pendingTypeReviews, previewLayerType } = await import('../src/type-review.js');
 const { applyAreaSuggestions } = await import('../src/area-suggestions.js');
 const { generateStencil, measureContour } = await import('../src/geometry.js');
 const { channelWidthAt } = await import('../src/regions.js');
@@ -104,4 +104,26 @@ test('compound decisions apply to the parent and reject invalid open-path types'
   const before = structuredClone(state);
   assert.equal(decideLayerType(state, 'shape-0', 'manual', 'keep'), false);
   assert.deepEqual(state, before);
+});
+
+test('confirming an explicit visible type reveals a hidden object and preserves its tabs', () => {
+  const state = fixture();
+  state.hiddenContours = ['outline-0'];
+  state.tabLayouts['outline-0'] = [{ id: 'saved-tab', position: 0.4 }];
+  assert.equal(decideLayerType(state, 'shape-0', 'manual', 'outline'), true);
+  assert.deepEqual(state.hiddenContours, []);
+  assert.equal(state.materialTreatments['shape-0'], 'outline');
+  assert.equal(state.tabLayouts['outline-0'][0].id, 'saved-tab');
+});
+
+test('type previews use the confirmed geometry rules while leaving the document and queue unchanged', () => {
+  const state = fixture(), before = structuredClone(state);
+  for (const mode of ['outline', 'keep', 'cut', 'hidden']) {
+    const preview = previewLayerType(state, 'shape-0', mode);
+    const confirmed = structuredClone(state);
+    decideLayerType(confirmed, 'shape-0', 'manual', mode);
+    assert.deepEqual(generateStencil(state.artwork.contours, { ...options, ...preview }).paths, generateStencil(state.artwork.contours, { ...options, ...confirmed }).paths);
+    assert.deepEqual(state, before);
+    assert.deepEqual(pendingTypeReviews(state), ['shape-0', 'shape-1']);
+  }
 });

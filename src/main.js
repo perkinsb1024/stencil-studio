@@ -3,7 +3,7 @@ import { configureLengthControls, displayLength, formatLength, gridMarkup, setLe
 import { drawMarginSelection, clearMarginSelection } from './selection-overlay.js';
 import { createBusyTask } from './busy-task.js';
 import { updateWorkspaceUI, updatePanHint } from './workspace-ui.js';
-import { pendingTypeReviews, typeReviewIds, decideLayerType } from './type-review.js';
+import { pendingTypeReviews, typeReviewIds, decideLayerType, previewLayerType } from './type-review.js';
 import { workspaceView } from './workspace-view.js';
 import { createOrderedList, orderControls } from './ordered-list.js';
 import { scaleRegions } from './regions.js';
@@ -75,6 +75,7 @@ function notify(message, kind = 'success') {
 
 let geometryKey = null, geometryArtwork = null, detectAreas = false, completedWorkspace = null, detectionBefore = null;
 let snapPreviewView = null;
+let typeReviewPreview = null;
 const busy = createBusyTask({
   root: $('#app'), overlay: $('#preview-busy'), stage: $('#canvas-viewport'),
   onCancel() { snapPreviewView = null; rollbackGeneration(); notify('Calculation cancelled. Previous stencil restored.'); },
@@ -85,7 +86,16 @@ function geometrySettings() {
   // Generate Bridges reads those preferences directly from state.
   const keys = [...Object.keys(defaults), 'tabLayouts', 'objectSettings', 'hiddenContours', 'cutawayContours', 'regions',
     'materialTreatments', 'materialOrder', 'regionBridges', 'minimumMaterialWidth', 'areaOverrides'];
-  return { ...Object.fromEntries(keys.map(key => [key, state[key]])), analyzeMaterial: state.editingBridges || state.workflowStep === 3 };
+  const preview = typeReviewPreviewState();
+  return { ...Object.fromEntries(keys.map(key => [key, preview[key]])), analyzeMaterial: state.editingBridges || state.workflowStep === 3 };
+}
+function typeReviewPreviewState() {
+  return typeReviewPreview && state.editingOutlines && state.reviewingTypes && state.reviewRegion === typeReviewPreview.id
+    ? previewLayerType(state, typeReviewPreview.id, typeReviewPreview.mode) : state;
+}
+function clearTypeReviewPreview() {
+  typeReviewPreview = null;
+  $('#review-treatment').selectionKey = null;
 }
 function geometryGestureActive() { return Boolean(drag || regionEditor.dragging || bridgeEditor.dragging); }
 function rememberCompletedWorkspace() {
@@ -95,6 +105,7 @@ function rememberCompletedWorkspace() {
   queueWorkspaceSave();
 }
 function rollbackGeneration() {
+  clearTypeReviewPreview();
   cancelAnimationFrame(renderFrame); pendingSettings = null; positionGesture = null; detectAreas = false; detectionBefore = null;
   if (completedWorkspace) {
     Object.assign(state, structuredClone({ ...completedWorkspace.state, artwork: null, result: null, scaled: null }),
@@ -171,7 +182,7 @@ function render() {
   if ((state.view === 'material' || state.showTabs) && !state.editingOutlines) svg.innerHTML += renderTabMarkers();
   if (state.editingOutlines) svg.innerHTML += renderOutlineTargets();
   if (state.editingRegions) svg.innerHTML += regionEditor.overlay();
-  if (state.view === 'material' || state.editingBridges || state.showBridges || state.workflowStep === 3) svg.innerHTML += bridgeEditor.overlay();
+  if (!state.editingOutlines && (state.view === 'material' || state.editingBridges || state.showBridges || state.workflowStep === 3)) svg.innerHTML += bridgeEditor.overlay();
   svg.classList.toggle('editing-tabs', state.editing);
   svg.classList.toggle('editing-outlines', state.editingOutlines);
   svg.classList.toggle('adding-tab', state.adding);
@@ -226,6 +237,7 @@ function layerName(id) {
 }
 function reviewUncertainArea() {
   activateTool('layers');
+  clearTypeReviewPreview();
   if (!state.areaSuggestions) mutate(refreshAreaSuggestions);
   state.reviewingTypes = true;
   const pending = uncertainAreas();
@@ -237,6 +249,7 @@ function focusReviewRegion() {
   if (state.reviewRegion) state.selectedOutlines = state.artwork.contours.filter(c => c.regionId === state.reviewRegion).map(c => c.id);
 }
 function advanceTypeReview(direction = 1, unresolvedOnly = false) {
+  clearTypeReviewPreview();
   const ids = typeReviewIds(state), current = ids.indexOf(state.reviewRegion);
   const remaining = uncertainAreas();
   for (let offset = 1; offset <= ids.length; offset++) {
@@ -250,15 +263,15 @@ function resolveTypeReview(choice, mode = null) {
   mutate(() => decideLayerType(state, state.reviewRegion, choice, mode));
   announce(`${layerName(state.reviewRegion)} reviewed. ${uncertainAreas().length} remaining.`);
   advanceTypeReview(1, true);
-  (state.reviewRegion ? $('#accept-area-suggestion') : $('#close-type-review')).focus({ preventScroll: true });
+  (uncertainAreas().length ? $('#review-treatment') : $('#outline-inspector h2')).focus({ preventScroll: true });
 }
 function updateTypeReview() {
   const pending = uncertainAreas(), all = typeReviewIds(state);
   $('#review-count').textContent = state.areaSuggestions ? pending.length ? `${pending.length} Need Review` : 'No Types Need Review' : 'Not Checked';
   $('#review-areas').hidden = !!state.areaSuggestions && !pending.length;
-  $('#review-areas').textContent = state.areaSuggestions ? 'Review Object Types' : 'Detect Object Types';
-  $('#type-review').hidden = !state.reviewingTypes;
-  if (!state.reviewingTypes) return;
+  $('#review-areas').textContent = state.areaSuggestions ? 'Check Object Types' : 'Detect Object Types';
+  $('#type-review').hidden = !state.reviewingTypes || !pending.length;
+  if ($('#type-review').hidden) return;
   if (!state.reviewRegion && pending.length) { state.reviewRegion = pending[0]; focusReviewRegion(); }
   if (state.reviewRegion && !all.includes(state.reviewRegion)) state.reviewRegion = pending[0] ?? null;
   const id = state.reviewRegion, suggestion = state.areaSuggestions?.byRegion[id];
@@ -266,30 +279,29 @@ function updateTypeReview() {
   const hasLayer = Boolean(suggestion && members.length);
   $('#review-layer-name').textContent = hasLayer ? layerName(id) : 'Object Types Reviewed';
   $('#review-thumbnail').innerHTML = hasLayer ? members.map(outlineThumbnail).join('') : '';
-  $('#review-current').textContent = hasLayer ? members.every(c => state.hiddenContours.includes(c.id)) ? `Hidden (${treatmentLabel(materialMode(members[0], state))})` : treatmentLabel(materialMode(members[0], state)) : 'All Choices Saved';
-  $('#review-suggested').textContent = hasLayer ? treatmentLabel(suggestion.mode) : 'No Remaining Choices';
-  $('#area-review-hint').textContent = hasLayer ? suggestion.reason : 'You can still change any object type or continue to review the stencil.';
-  const progress = `${pending.length} Remaining`;
-  if ($('#review-progress').textContent !== progress) $('#review-progress').textContent = progress;
-  for (const selector of ['#accept-area-suggestion', '#keep-area-type', '#review-treatment']) $(selector).disabled = !hasLayer;
-  $('#accept-area-suggestion').textContent = suggestion?.mode === 'hidden' ? 'Hide Object' : 'Use Suggested Type';
-  $('#accept-area-suggestion').setAttribute('aria-label', hasLayer ? `Use ${treatmentLabel(suggestion.mode)} for ${layerName(id)}` : 'Use Suggested Type');
-  $('#keep-area-type').textContent = suggestion?.mode === 'hidden' ? 'Keep Visible' : 'Keep Current Type';
-  $('.review-types').hidden = !hasLayer;
-  $('.review-decisions').hidden = !hasLayer;
-  $('#review-treatment').parentElement.hidden = !hasLayer;
-  $('#review-treatment').value = hasLayer ? materialMode(members[0], state) : 'outline';
-  for (const option of $('#review-treatment').options) option.disabled = option.value !== 'outline' && members.some(c => !c.closed);
-  $('#previous-area').disabled = !all.length;
-  $('#next-area').disabled = !all.length;
+  $('#review-suggested').textContent = hasLayer ? `Suggested: ${treatmentLabel(suggestion.mode)}` : '';
+  $('#area-review-hint').textContent = hasLayer ? suggestion.reason : '';
+  const select = $('#review-treatment');
+  select.disabled = $('#confirm-area-type').disabled = !hasLayer;
+  const current = hasLayer && members.every(c => state.hiddenContours.includes(c.id)) ? 'hidden' : hasLayer ? materialMode(members[0], state) : 'outline';
+  const selectionKey = JSON.stringify([id, current, suggestion?.mode]);
+  // Keep an unconfirmed selection through unrelated renders, but reset for a new object or document choice.
+  if (select.selectionKey !== selectionKey) { select.value = current; select.selectionKey = selectionKey; }
+  for (const option of select.options) {
+    option.textContent = `${option.value === 'hidden' ? 'Hide Object' : treatmentLabel(option.value)}${option.value === suggestion?.mode ? ' (Suggested)' : ''}`;
+    option.disabled = ['keep', 'cut'].includes(option.value) && members.some(c => !c.closed);
+  }
+  $('#previous-area').disabled = pending.length < 2;
+  $('#next-area').disabled = pending.length < 2;
 }
 
-function visibleContours() { return state.scaled.contours.filter(c => !state.hiddenContours.includes(c.id)); }
+function visibleContours() { const preview = typeReviewPreviewState(); return state.scaled.contours.filter(c => !preview.hiddenContours.includes(c.id)); }
 function channelContours() { return visibleContours().filter(c => materialMode(c, state) === 'outline'); }
 function outlineNumber(id) { return state.artwork.contours.findIndex(c => c.id === id) + 1; }
 function renderOutlineTargets() {
+  const preview = typeReviewPreviewState();
   return `<g class="outline-visibility-targets">${[...state.scaled.contours].sort((a, b) => state.materialOrder.indexOf(a.regionId) - state.materialOrder.indexOf(b.regionId)).map(c => {
-    const hidden = state.hiddenContours.includes(c.id), selected = state.selectedOutlines.includes(c.id);
+    const hidden = preview.hiddenContours.includes(c.id), selected = state.selectedOutlines.includes(c.id);
     if (hidden && !state.showHiddenOutlines) return '';
     return `<g data-visibility-outline="${c.id}" class="visibility-outline ${hidden ? 'is-hidden' : ''} ${selected ? 'selected' : ''}" tabindex="0" role="button" aria-label="Object ${outlineNumber(c.id)}, ${hidden ? 'hidden' : 'visible'}" aria-pressed="${selected}">
       <path class="outline-guide" d="${pathData(c.points, c.closed)}" fill="none" vector-effect="non-scaling-stroke" pointer-events="none"/>
@@ -431,6 +443,9 @@ function updateOutlineEditor() {
     }).join('') || '<p class="empty-state">No objects match this filter.</p>';
     list.artwork = state.artwork; list.visibilityKey = key; list.scrollTop = scroll;
     if (focus) document.getElementById(focus)?.focus({ preventScroll: true });
+  }
+  for (const card of list.querySelectorAll('.layer-card')) {
+    card.querySelector('.layer-treatment').hidden = !$('#type-review').hidden && card.dataset.orderId === state.reviewRegion;
   }
   updateOutlineSelectionHighlights();
 }
@@ -616,8 +631,6 @@ function updateTabEditor() {
   $('#edit-hint').hidden = !state.editing;
   $('#edit-hint').textContent = state.adding ? 'Click this object’s outline to add tabs. Choose Cancel Placement or press Escape to finish.' : 'Click Add Tabs, then click this object’s outline. Select a tab on the canvas to edit it.';
   $('#tab-inspector').hidden = !state.editing;
-  $('#show-tabs').disabled = state.view === 'material';
-  $('#show-tabs').checked = state.view === 'material' || state.showTabs;
   $('#outline-picker').innerHTML = contours.map(c => `<option value="${c.id}">${htmlText(layerName(c.regionId))}${state.artwork.contours.filter(member => member.regionId === c.regionId).length > 1 ? `, Contour ${state.artwork.contours.filter(member => member.regionId === c.regionId).indexOf(c) + 1}` : ''} (${Object.hasOwn(state.tabLayouts, c.id) ? 'Custom' : 'Automatic'})</option>`).join('');
   const contour = selectedContour();
   if (!contour) return;
@@ -785,6 +798,7 @@ function closeActionPanels() {
 }
 function navigateStep(step) {
   if (![1, 2, 3].includes(step)) return;
+  clearTypeReviewPreview();
   closeActionPanels();
   layerOrdering.cancel(); regionOrdering.cancel();
   commitWorkspaceEdits(); clearGhost();
@@ -796,6 +810,7 @@ function navigateStep(step) {
 function activateTool(tool) {
   if (!(tool in toolModes) || !toolAvailable(tool)) return;
   if (state.workflowStep === 2 && state.activeTool === tool) return;
+  clearTypeReviewPreview();
   closeActionPanels();
   layerOrdering.cancel(); regionOrdering.cancel();
   commitWorkspaceEdits(); clearGhost(); bridgeEditor.cancel();
@@ -844,12 +859,21 @@ $('#preview-options').addEventListener('toggle', positionOverlayMenu);
 window.addEventListener('resize', positionOverlayMenu);
 window.addEventListener('scroll', positionOverlayMenu, true);
 $('#review-areas').addEventListener('click', reviewUncertainArea);
-$('#close-type-review').addEventListener('click', () => { state.reviewingTypes = false; render(); $('#review-areas').hidden ? $('#outline-inspector h2').focus() : $('#review-areas').focus(); });
-$('#next-area').addEventListener('click', () => advanceTypeReview(1));
-$('#previous-area').addEventListener('click', () => advanceTypeReview(-1));
-$('#accept-area-suggestion').addEventListener('click', () => resolveTypeReview('accepted'));
-$('#keep-area-type').addEventListener('click', () => resolveTypeReview('kept'));
-$('#review-treatment').addEventListener('change', event => resolveTypeReview('manual', event.target.value));
+$('#close-type-review').addEventListener('click', () => { clearTypeReviewPreview(); state.reviewingTypes = false; render(); $('#review-areas').hidden ? $('#outline-inspector h2').focus() : $('#review-areas').focus(); });
+$('#next-area').addEventListener('click', () => advanceTypeReview(1, true));
+$('#previous-area').addEventListener('click', () => advanceTypeReview(-1, true));
+$('#review-treatment').addEventListener('change', event => {
+  typeReviewPreview = { id: state.reviewRegion, mode: event.target.value };
+  render();
+});
+$('#confirm-area-type').addEventListener('click', () => {
+  const members = state.artwork.contours.filter(c => c.regionId === state.reviewRegion);
+  if (!members.length) return;
+  const mode = $('#review-treatment').value;
+  const current = members.every(c => state.hiddenContours.includes(c.id)) ? 'hidden' : materialMode(members[0], state);
+  const suggestion = state.areaSuggestions?.byRegion[state.reviewRegion];
+  resolveTypeReview(mode === current ? 'kept' : mode === suggestion?.mode ? 'accepted' : 'manual', mode);
+});
 $('#apply-area-suggestions').addEventListener('click', () => mutate(refreshAreaSuggestions));
 $('#use-all-outlines').addEventListener('click', () => mutate(() => {
   state.materialTreatments = {}; state.hiddenContours = []; state.cutawayContours = [];
@@ -1304,6 +1328,7 @@ function syncSourceInputs() {
   document.querySelectorAll('[data-example]').forEach(b => b.classList.toggle('active', b.dataset.example === state.example));
 }
 function restore(saved) {
+  clearTypeReviewPreview();
   cancelAnimationFrame(renderFrame); pendingSettings = null; positionGesture = null;
   measureTool.cancelDraft();
   state.measurements = structuredClone(saved.measurements ?? []);
@@ -1340,6 +1365,7 @@ function commitSettings() {
   queueWorkspaceSave();
 }
 function mutate(action) {
+  clearTypeReviewPreview();
   commitSettings(); cancelAnimationFrame(renderFrame);
   const before = snapshot(); action();
   if (detectAreas) detectionBefore = before;

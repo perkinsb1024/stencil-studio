@@ -25,7 +25,16 @@ async function load(reload = false) {
 }
 function save() { w.dispatchEvent(new w.Event('stencil:before-reload')); return JSON.parse(localStorage.getItem(key)); }
 await load();
-await click('#step-next'); await click('#edit-tabs');
+await click('#step-next');
+await check('Objects hides and unchecks highlights without changing saved overlay choices', async () => {
+  for (const id of ['#show-tabs', '#show-bridges']) assert(!$(id).checked && $(id).disabled);
+  assert(!$('.tab-markers') && !$('.region-bridge'));
+  assert(save().ui.showTabs && save().ui.showBridges);
+  await click('#cut-view');
+  for (const id of ['#show-tabs', '#show-bridges']) assert(!$(id).checked && $(id).disabled);
+  await click('#material-view');
+});
+await click('#edit-tabs');
 await check('Stencil forces highlights on and disables the two checkboxes', async () => {
   for (const id of ['#show-tabs', '#show-bridges']) assert($(id).checked && $(id).disabled);
   assert($('.tab-markers'));

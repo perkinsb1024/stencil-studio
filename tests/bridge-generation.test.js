@@ -47,3 +47,35 @@ test('bounded ray queries preserve diagonal connections across compound material
   assert.deepEqual(bridges.map(b => b.key), ['0.878,0.204:0.906,0.081', '0.081,0.094:0.204,0.122', '0.386,0.987:0.426,0.816']);
   supported(rotated, options, bridges);
 });
+
+test('automatic bridges continue a counter stem flush through a rounded bowl, including rotated artwork', () => {
+  const arc = (radius, start, end) => Array.from({ length: 81 }, (_, i) => {
+    const angle = start + (end - start) * i / 80;
+    return { x: 20 + radius * Math.cos(angle), y: 50 + radius * Math.sin(angle) };
+  });
+  const angle = Math.acos(6 / 24);
+  const outer = arc(30, -Math.PI / 2, Math.PI / 2);
+  const counter = arc(24, -angle, angle);
+  const settings = { ...options, materialTreatments: { 'shape-0': 'cut' } };
+  for (const rotation of [0, 0.35]) {
+    const transform = p => ({ x: 50 + (p.x - 50) * Math.cos(rotation) - (p.y - 50) * Math.sin(rotation),
+      y: 50 + (p.x - 50) * Math.sin(rotation) + (p.y - 50) * Math.cos(rotation) });
+    const shapes = [shape(0, outer.map(transform)), { ...shape(1, counter.map(transform)), regionId: 'shape-0' }].map(c => ({ ...c, fillRule: 'evenodd' }));
+    const bridges = generateRegionBridges(shapes, [], settings);
+    assert.equal(bridges.length, 1);
+    supported(shapes, settings, bridges);
+    const bridge = bridges[0], stem = transform({ x: 26, y: 50 });
+    const along = { x: -Math.sin(rotation), y: Math.cos(rotation) };
+    const across = { x: Math.cos(rotation), y: Math.sin(rotation) };
+    const dx = bridge.b.x - bridge.a.x, dy = bridge.b.y - bridge.a.y;
+    assert.ok(Math.abs(dx * across.x + dy * across.y) < 0.0002, 'Bridge should follow the stem direction');
+    const offset = (bridge.a.x - stem.x) * across.x + (bridge.a.y - stem.y) * across.y;
+    assert.ok(Math.abs(offset - bridge.width / 2) < 0.0002, 'Bridge side should align with the counter stem');
+    assert.ok(Math.abs(dx * along.x + dy * along.y) > 0, 'Bridge should cross the bowl');
+    assert.deepEqual(generateRegionBridges(shapes, [], settings), bridges);
+    const alternative = generateRegionBridges(shapes, [], { ...settings, bridgeExclusions: [bridge.key] });
+    assert.equal(alternative.length, 1);
+    assert.notEqual(alternative[0].key, bridge.key, 'Excluded edge continuations must not return');
+    supported(shapes, settings, alternative);
+  }
+});

@@ -51,7 +51,7 @@ export function updateWorkspaceUI(state) {
   $('#step-next').hidden = step === 3;
   const toolName = { layers: 'Objects', tabs: 'Tabs', bridges: 'Bridges', regions: 'Override Regions' }[state.activeTool];
   $('#step-back').textContent = step === 3 ? `Back to ${toolName}` : 'Back to Artwork';
-  $('#step-next').textContent = step === 2 ? 'Continue to Review' : `Continue to ${toolName}`;
+  $('#step-next').textContent = step === 2 ? 'Review & Export' : `Continue to ${toolName}`;
   $('#pan-preview').hidden = step !== 2;
   $('#pan-preview').title = state.zoom >= 1 ? 'Toggle between dragging to pan and editing artwork' : 'Zoom to 100% to pan while editing';
   updatePanHint(state);
@@ -84,10 +84,12 @@ export function updateWorkspaceUI(state) {
   markup($('#import-issues'), sourceWarnings.map(message => `<p>${escape(message)}</p>`).join(''));
   const tabCount = state.result.bridges.length, bridgeCount = state.regionBridges.length, cuts = state.result.paths.length;
   markup($('#cut-count'), [[cuts, 'Cut Boundary', 'Cut Boundaries'], [tabCount, 'Tab'], [bridgeCount, 'Bridge']].map(([number, singular, multiple]) => `<span class="count-pill ${number ? '' : 'zero'}">${plural(number, singular, multiple)}</span>`).join(''));
-  markup($('#preview-legend'), `<span><i class="legend-cut"></i>${state.view === 'cut' ? 'Cut Boundaries' : 'Cut Away'}</span>${state.view === 'material' ? '<span><i class="legend-material"></i>Retained Material</span>' : ''}${(state.view === 'material' || state.showTabs) && !state.editingOutlines && tabCount ? '<span><i class="legend-tab"></i>Automatic Tab</span><span><i class="legend-custom-tab"></i>Custom Tab</span>' : ''}${(state.view === 'material' || state.showBridges) && bridgeCount ? '<span><i class="legend-bridge legend-automatic-bridge"></i>Automatic Bridge</span><span><i class="legend-bridge legend-custom-bridge"></i>Custom Bridge</span><span><i class="legend-bridge legend-invalid-bridge"></i>Invalid Bridge</span>' : ''}`);
-  $('#show-bridges').checked = state.view === 'material' || state.showBridges;
-  $('#show-bridges').disabled = state.view === 'material';
-  $('#highlight-hint').textContent = state.view === 'material' ? 'Highlights stay on in Stencil view. Switch to Cut Paths to hide them.' : 'Turn off both highlights to inspect cut paths without tab or bridge guides, even while editing.';
+  markup($('#preview-legend'), `<span><i class="legend-cut"></i>${state.view === 'cut' ? 'Cut Boundaries' : 'Cut Away'}</span>${state.view === 'material' ? '<span><i class="legend-material"></i>Retained Material</span>' : ''}${(state.view === 'material' || state.showTabs) && !state.editingOutlines && tabCount ? '<span><i class="legend-tab"></i>Automatic Tab</span><span><i class="legend-custom-tab"></i>Custom Tab</span>' : ''}${(state.view === 'material' || state.showBridges) && !state.editingOutlines && bridgeCount ? '<span><i class="legend-bridge legend-automatic-bridge"></i>Automatic Bridge</span><span><i class="legend-bridge legend-custom-bridge"></i>Custom Bridge</span><span><i class="legend-bridge legend-invalid-bridge"></i>Invalid Bridge</span>' : ''}`);
+  for (const [id, enabled] of [['show-tabs', state.showTabs], ['show-bridges', state.showBridges]]) {
+    $(`#${id}`).checked = !state.editingOutlines && (state.view === 'material' || enabled);
+    $(`#${id}`).disabled = state.editingOutlines || state.view === 'material';
+  }
+  $('#highlight-hint').textContent = state.editingOutlines ? 'Tab and bridge highlights are hidden while editing objects.' : state.view === 'material' ? 'Highlights stay on in Stencil view. Switch to Cut Paths to hide them.' : 'Turn off both highlights to inspect cut paths without tab or bridge guides, even while editing.';
   $('#outlines-empty').hidden = visibleLayers !== 0;
   $('#no-cuts').hidden = visibleLayers === 0 || cuts > 0;
   const warnings = [...new Set(state.result.warnings)];
@@ -114,6 +116,6 @@ export function updateWorkspaceUI(state) {
     const problems = (state.result.unsupported?.length ?? 0) || (state.result.narrowConnections ?? 0) || state.result.regionBridges?.some(bridge => !bridge.valid) || state.result.components?.filter(component => component.sheetConnected).length > 1;
     $('#review-support').classList.toggle('has-issues', Boolean(problems));
     $('#review-support').textContent = !state.result.components ? 'Material Has Not Been Checked' : problems ? 'Material Needs Attention' : state.result.components.length ? 'All Material Connected' : 'No Retained Material';
-    markup($('#review-issues'), `${pending.length ? `<div class="review-issue"><strong>${plural(pending.length, 'Object Type')} Need Review</strong><p>Uncertain proposals are still using their current types.</p><button class="small-button" data-review-types>Review Object Types</button></div>` : ''}${stale ? '<div class="review-issue"><p>Type suggestions were made with earlier settings. Your current choices are preserved.</p><button class="small-button" data-open-tool="layers">Review Object Settings</button></div>' : ''}${warnings.map(message => `<div class="review-issue"><p>${escape(message)}</p><button class="small-button" data-open-tool="${issueTool(message)}">${{ layers: 'Edit Objects', tabs: 'Edit Tabs', bridges: 'Edit Bridges', regions: 'Edit Override Regions' }[issueTool(message)]}</button></div>`).join('')}`);
+    markup($('#review-issues'), `${pending.length ? `<div class="review-issue"><strong>${plural(pending.length, 'Object Type')} Need Review</strong><p>Uncertain proposals are still using their current types.</p><button class="small-button" data-review-types>Check Object Types</button></div>` : ''}${stale ? '<div class="review-issue"><p>Type suggestions were made with earlier settings. Your current choices are preserved.</p><button class="small-button" data-open-tool="layers">Review Object Settings</button></div>' : ''}${warnings.map(message => `<div class="review-issue"><p>${escape(message)}</p><button class="small-button" data-open-tool="${issueTool(message)}">${{ layers: 'Edit Objects', tabs: 'Edit Tabs', bridges: 'Edit Bridges', regions: 'Edit Override Regions' }[issueTool(message)]}</button></div>`).join('')}`);
   }
 }

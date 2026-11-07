@@ -10,6 +10,12 @@ export function typeReviewIds(state) {
   return [...new Set([...state.materialOrder, ...state.artwork.contours.map(contour => contour.regionId)])].reverse().filter(id => ids.has(id));
 }
 
+// Preview a choice with the same rules as confirmation, without editing the document.
+export function previewLayerType(state, id, mode) {
+  const preview = { ...state, materialTreatments: { ...state.materialTreatments }, areaOverrides: { ...state.areaOverrides }, areaDecisions: { ...state.areaDecisions } };
+  return decideLayerType(preview, id, 'manual', mode) ? preview : state;
+}
+
 // Review decisions are document edits, including approving the unchanged type.
 export function decideLayerType(state, id, choice, explicitMode = null) {
   const members = state.artwork.contours.filter(contour => contour.regionId === id);
@@ -24,7 +30,7 @@ export function decideLayerType(state, id, choice, explicitMode = null) {
   } else {
     state.materialTreatments[id] = mode;
     state.cutawayContours = state.cutawayContours.filter(contourId => !ids.has(contourId));
-    if (choice === 'accepted' || choice === 'kept' && suggestion.mode === 'hidden') state.hiddenContours = state.hiddenContours.filter(contourId => !ids.has(contourId));
+    if (explicitMode !== null || choice === 'accepted' || choice === 'kept' && suggestion.mode === 'hidden') state.hiddenContours = state.hiddenContours.filter(contourId => !ids.has(contourId));
   }
   state.areaOverrides[id] = true;
   state.areaDecisions ??= {};

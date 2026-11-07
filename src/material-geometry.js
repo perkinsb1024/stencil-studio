@@ -259,7 +259,10 @@ function fitSingleStrokeBridge(bridge, cuts, search, trim = true) {
   const origin = { x: a.x - u.x * radius, y: a.y - u.y * radius }, extent = length + width;
   let entry = Infinity, exit = -Infinity;
   for (const fraction of [-1, -0.66, -0.33, 0, 0.33, 0.66, 1]) {
-    const p = { x: origin.x - u.y * radius * fraction, y: origin.y + u.x * radius * fraction };
+    // A side may coincide with the stem it continues. Query just inside the
+    // strip so a shared boundary is not mistaken for a second crossed stroke.
+    const offset = fraction * Math.max(0, radius - 0.0002);
+    const p = { x: origin.x - u.y * offset, y: origin.y + u.x * offset };
     const breaks = [0, ...rayHits(p, u, search.localPaths(p, u, extent, cuts)).filter(t => t < extent), extent]
       .filter((t, i, values) => !i || t - values[i - 1] > 0.0001);
     const intervals = [];
@@ -295,6 +298,91 @@ function rayHits(origin, direction, paths) {
     if (t > 0.001 && u >= -1e-8 && u <= 1 + 1e-8) hits.push(t);
   }
   return hits.sort((a, b) => a - b);
+}
+
+// Group tessellated, nearly straight curve sections into usable edges. Keep the
+// original cut polygons for fitting and validation; this only guides placement.
+function continuationEdges(path, width) {
+  const edges = [], exact = [], tolerance = width * 0.025;
+  for (let i = 0; i < path.length; i++) {
+    const a = path[i];
+    const next = path[(i + 1) % path.length], segmentLength = Math.hypot(next.x - a.x, next.y - a.y);
+    if (segmentLength >= width * 1.5) exact.push({ a, b: next, length: segmentLength,
+      before: path[(i + path.length - 1) % path.length], after: path[(i + 2) % path.length] });
+    let last = 1;
+    for (let span = 2; span < path.length; span++) {
+      const b = path[(i + span) % path.length];
+      let straight = true;
+      for (let k = 1; k < span; k++) {
+        const p = path[(i + k) % path.length], q = nearestOnSegment(p, a, b);
+        if (Math.hypot(p.x - q.x, p.y - q.y) > tolerance) { straight = false; break; }
+      }
+      if (!straight) break;
+      last = span;
+    }
+    const b = path[(i + last) % path.length], length = Math.hypot(b.x - a.x, b.y - a.y);
+    if (length < width * 1.5) continue;
+    edges.push({ a, b, length, before: path[(i + path.length - 1) % path.length], after: path[(i + last + 1) % path.length] });
+  }
+  // Adjacent samples often describe the same line. Retain actual straight
+  // segments first, then the longest distinct curve runs, to bound fitting work.
+  const distinct = [];
+  for (const edge of [...exact, ...edges.sort((a, b) => b.length - a.length)]) {
+    if (distinct.some(line => {
+      const dot = ((edge.b.x - edge.a.x) * (line.b.x - line.a.x) + (edge.b.y - edge.a.y) * (line.b.y - line.a.y)) / (edge.length * line.length);
+      return Math.abs(dot) > Math.cos(5 * Math.PI / 180) && [edge.a, edge.b].every(p => {
+        const q = nearestOnSegment(p, line.a, line.b);
+        return Math.hypot(p.x - q.x, p.y - q.y) <= tolerance * 2;
+      });
+    })) continue;
+    distinct.push(edge);
+  }
+  return distinct;
+}
+
+// Continue a substantial straight edge into the neighboring curve. Sampling
+// only shortest gaps misses these flush placements at the ends of letter stems.
+function edgeCandidates(material, options, search) {
+  if (options.bridgeMatchFeatures === false) return [];
+  const width = options.bridgeWidth ?? 3, candidates = [];
+  for (const component of material.unsupported) for (const path of component.paths) {
+    for (const { a, b, length, before, after } of continuationEdges(path, width)) {
+      const u = { x: (b.x - a.x) / length, y: (b.y - a.y) / length };
+      for (const sign of [-1, 1]) {
+        const end = sign === 1 ? b : a;
+        const next = sign === 1 ? after : before;
+        // Hard polygon corners have no curved stroke to continue through.
+        if (Math.hypot(next.x - end.x, next.y - end.y) >= width) continue;
+        const direction = { x: u.x * sign, y: u.y * sign };
+        for (const side of [-1, 1]) for (const anchor of [-1, -0.25, 0.25]) {
+          const origin = { x: end.x + direction.x * width * anchor - u.y * side * width / 2,
+            y: end.y + direction.y * width * anchor + u.x * side * width / 2 };
+          if (!search.contains(origin, component.paths)) continue;
+          const exit = rayHits(origin, direction, component.paths)[0];
+          if (!exit) continue;
+          for (const target of material.components) {
+            if (target === component) continue;
+            const entry = rayHits(origin, direction, target.paths).find(t => t > exit + 0.01);
+            if (!entry) continue;
+            // Try a deeper anchor for curved exits, while retaining the shallow
+            // fit when a neighboring stroke leaves little room beyond the cut.
+            for (const overlap of [width / 2, width]) {
+              const b = { x: origin.x + direction.x * (entry + overlap), y: origin.y + direction.y * (entry + overlap) };
+              if (!search.contains(b, target.paths)) continue;
+              const candidate = fitSingleStrokeBridge({ a: origin, b, width, distance: entry - exit }, material.paths, search);
+              if (candidate) {
+                // Prefer edge continuations, ranked by their full fitted length.
+                candidate.designScore = Math.hypot(candidate.b.x - candidate.a.x, candidate.b.y - candidate.a.y) * 0.4 + width * 0.1;
+                candidates.push(candidate);
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return candidates;
 }
 
 // Extend the centerline of an existing elongated feature, rather than attaching
@@ -454,7 +542,7 @@ export function generateRegionBridges(contours, channelCuts, options, onProgress
   for (let iteration = 0; iteration < 100 && bridges.length < 100; iteration++) {
     onProgress(0.05 + 0.7 * (1 - Math.max(0, result.components.length - 1) / initialConnections));
     if (result.components.length <= 1) break;
-    const candidates = featureCandidates(contours, result, options, search).map(b => fitSingleStrokeBridge(b, result.paths, search)).filter(Boolean);
+    const candidates = [...edgeCandidates(result, options, search), ...featureCandidates(contours, result, options, search).map(b => fitSingleStrokeBridge(b, result.paths, search)).filter(Boolean)];
     // Components and cuts change after acceptance; pair results belong only
     // to this iteration (with its fixed bridge width and material geometry).
     const candidateCache = new Map();
@@ -484,10 +572,11 @@ export function generateRegionBridges(contours, channelCuts, options, onProgress
     const original = composeMaterial(contours, channelCuts, { ...options, regionBridges: options.regionBridges?.filter(b => !b.automatic) ?? [] });
     const islands = original.unsupported.slice(0, 50);
     const candidateCache = new Map();
+    const edgeContinuations = edgeCandidates(original, options, search);
     for (const [index, island] of islands.entries()) {
       onProgress(0.75 + 0.2 * index / islands.length);
       const targets = original.components.filter(c => c.sheetConnected);
-      const candidates = [...featureCandidates(contours, original, options, search).filter(b => search.contains(b.a, island.paths)).map(b => fitSingleStrokeBridge(b, original.paths, search)).filter(Boolean), ...targets.flatMap(target => candidatesBetween(island, target, width, original.paths, search, candidateCache))].sort((a, b) => a.designScore - b.designScore);
+      const candidates = [...edgeContinuations.filter(b => search.contains(b.a, island.paths) || search.contains(b.b, island.paths)), ...featureCandidates(contours, original, options, search).filter(b => search.contains(b.a, island.paths)).map(b => fitSingleStrokeBridge(b, original.paths, search)).filter(Boolean), ...targets.flatMap(target => candidatesBetween(island, target, width, original.paths, search, candidateCache))].sort((a, b) => a.designScore - b.designScore);
       for (const candidate of candidates) {
         if (bridges.length >= 100) break;
         const key = bridgeKey(candidate, options.artworkWidth, options.padding);

@@ -13,8 +13,8 @@ function check(name, action) {
   document.querySelector('#results').append(li);
 }
 // Use the rounded P/r/e artwork, not only rectangular synthetic counters.
-const source = new DOMParser().parseFromString(await (await fetch('/svgs/PhD.svg')).text(), 'image/svg+xml');
-const letters = [...source.querySelectorAll('path')].slice(7, 10).map(p => p.outerHTML).join('');
+const source = new DOMParser().parseFromString(await (await fetch('/svgs/phd.svg')).text(), 'image/svg+xml');
+const letters = [...source.querySelectorAll('path')].slice(11, 14).map(p => p.outerHTML).join('');
 const artwork = importSvg(`<svg xmlns="http://www.w3.org/2000/svg">${letters}</svg>`);
 const scaled = scaleArtwork(artwork, 50, 8);
 const options = { sheet: scaled, artworkWidth: 50, padding: 8, bridgeWidth: 3, minimumMaterialWidth: 0.5, materialTreatments: Object.fromEntries(artwork.sourceRegions.map(r => [r.id, 'cut'])) };
@@ -30,7 +30,8 @@ check('Full bridge end caps clear the cut instead of continuing down an adjacent
   for (const bridge of bridges) {
     const polygon = bridgePolygon(bridge);
     for (const [a, b] of [[polygon[0], polygon[1]], [polygon[2], polygon[3]]]) {
-      for (let i = 0; i <= 100; i++) {
+      // A cap corner may share the stem boundary. Its interior must be clear.
+      for (let i = 1; i < 100; i++) {
         const t = i / 100, point = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
         assert(!pointInMaterial(point, before.paths), 'Bridge cap extends into artwork');
       }
@@ -39,6 +40,39 @@ check('Full bridge end caps clear the cut instead of continuing down an adjacent
 });
 for (const [title, result, showBridges] of [['Source', before, false], ['Automatic bridges', after, true]]) {
   document.querySelector('#preview').insertAdjacentHTML('beforeend', `<h2>${title}</h2><svg viewBox="0 0 ${scaled.width} ${scaled.height}"><path d="${result.paths.map(pathData).join('')}" fill="#502c6c" fill-rule="nonzero"/>${showBridges ? bridges.map(b => `<path d="${pathData(bridgePolygon(b))}" fill="#f3d58b" fill-opacity="0.6" stroke="#b8862d" stroke-width="0.12"/>`).join('') : ''}</svg>`);
+}
+// Exercise the actual letters from the reported SVG at two physical scales.
+// The old shortest-gap search chose tilted strips beside P/D stems and crossed
+// the middle of e instead of continuing its shallow diagonal edge.
+for (const [index, name] of [[11, 'P'], [10, 'D'], [13, 'e']]) {
+  const letter = importSvg(`<svg xmlns="http://www.w3.org/2000/svg">${source.querySelectorAll('path')[index].outerHTML}</svg>`);
+  for (const width of [20, 30]) {
+    const size = scaleArtwork(letter, width, 3);
+    const settings = { ...options, artworkWidth: width, padding: 3, sheet: size,
+      materialTreatments: Object.fromEntries(letter.sourceRegions.map(r => [r.id, 'cut'])) };
+    const generated = generateRegionBridges(size.contours, [], settings);
+    const result = composeMaterial(size.contours, [], { ...settings, regionBridges: generated });
+    check(`${name} at ${width} mm follows its nearby edge and connects the counter`, () => {
+      assert(generated.length === 1 && result.unsupported.length === 0 && result.regionBridges[0].valid, 'Expected one valid connection');
+      const bridge = generated[0], dx = bridge.b.x - bridge.a.x, dy = bridge.b.y - bridge.a.y;
+      if (name === 'e') {
+        const slope = dy / dx;
+        assert(slope < -0.2 && slope > -0.5, `Expected the shallow diagonal edge, got slope ${slope}`);
+        const corner = size.contours[1].points.reduce((a, b) => b.x < a.x ? b : a);
+        const offset = Math.abs((corner.x - bridge.a.x) * dy - (corner.y - bridge.a.y) * dx) / Math.hypot(dx, dy);
+        assert(Math.abs(offset - bridge.width / 2) < 0.15, 'Bridge side must continue the counter edge');
+      } else {
+        assert(Math.abs(dx) < 0.0001, 'Bridge must be parallel to the vertical stem');
+        const inner = size.contours[1].points;
+        const stemX = inner.reduce((best, p, i) => {
+          const q = inner[(i + 1) % inner.length];
+          return Math.abs(q.x - p.x) < 0.0001 && Math.abs(q.y - p.y) > best.length ? { x: p.x, length: Math.abs(q.y - p.y) } : best;
+        }, { length: 0 }).x;
+        assert(Math.abs(bridge.a.x - bridge.width / 2 - stemX) < 0.0001, 'Bridge side must sit flush with the stem');
+      }
+    });
+    if (width === 20) document.querySelector('#preview').insertAdjacentHTML('beforeend', `<h2>${name}: edge alignment</h2><svg style="width:260px" viewBox="0 0 ${size.width} ${size.height}"><path d="${result.baseCuts.map(p => pathData(p) + 'Z').join('')}" fill="none" stroke="#502c6c" stroke-width="0.1"/>${generated.map(b => `<path d="${pathData(bridgePolygon(b))}Z" fill="#fdfcf8" stroke="#7ca6b8" stroke-width="0.06"/>`).join('')}</svg>`);
+  }
 }
 document.querySelector('#summary').textContent = `${document.querySelectorAll('li:not(.fail)').length} passed, ${document.querySelectorAll('.fail').length} failed`;
 </script>

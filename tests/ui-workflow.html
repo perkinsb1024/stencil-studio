@@ -78,21 +78,38 @@ await check('Reviewing/skipping types only selects artwork; keeping a type resol
   const before = cuts(), history = saved().history.past.length;
   await click('#review-areas');
   assert(!$('#type-review').hidden && $('#review-count').textContent.includes('2'));
+  assert($('#step-next').textContent === 'Review & Export');
+  assert(!$('#review-progress') && !$('#review-current'));
+  assert($(`[data-order-id="${saved().ui.reviewRegion}"] .layer-treatment`).hidden);
+  assert([...$('#review-treatment').options].some(option => option.textContent.includes('(Suggested)')));
+  assert(!$('#review-treatment').textContent.includes('(current)'));
+  const documentBefore = JSON.stringify(saved().document);
+  await change('#review-treatment', 'cut');
+  assert(cuts() !== before, 'Choosing a type must update the SVG preview immediately');
+  assert(JSON.stringify(saved().document) === documentBefore && saved().history.past.length === history, 'Previewing must not save or confirm the type');
+  await change('#review-treatment', 'hidden');
+  assert($('.visibility-outline.selected').classList.contains('is-hidden'), 'Hide Object must preview the hidden guide');
+  await click('#close-type-review');
+  assert(cuts() === before, 'Closing must discard the preview');
+  await click('#review-areas');
+  await change('#review-treatment', 'cut');
   const first = saved().ui.reviewRegion;
   await click('#next-area');
   assert(saved().ui.reviewRegion !== first && cuts() === before && saved().history.past.length === history);
-  await click('#keep-area-type');
+  await click('#confirm-area-type');
   assert($('#review-count').textContent.includes('1') && cuts() === before);
   assert(saved().history.past.length === history + 1 && Object.values(saved().document.areaDecisions).includes('kept'));
 });
 await check('Undo restores uncertainty; redo and reload preserve the review queue and decision', async () => {
-  await click('#undo'); assert($('#review-count').textContent.includes('2'));
-  await click('#redo'); assert($('#review-count').textContent.includes('1'));
+  await click('#undo'); assert($('#review-count').textContent.includes('2'), 'Undo must restore both pending types');
+  await click('#redo'); assert($('#review-count').textContent.includes('1'), 'Redo must restore the confirmed type');
   const before = saved(); await load(true);
-  assert(saved().ui.workflowStep === 2 && saved().ui.reviewingTypes);
-  assert(JSON.stringify(saved().document.areaDecisions) === JSON.stringify(before.document.areaDecisions));
-  await click('#keep-area-type'); assert($('#review-areas').hidden && $('#review-progress').textContent === '0 Remaining');
-  await click('#close-type-review'); await click('#apply-area-suggestions');
+  assert(saved().ui.workflowStep === 2 && saved().ui.reviewingTypes, 'Reload must restore the type-check workflow');
+  assert(JSON.stringify(saved().document.areaDecisions) === JSON.stringify(before.document.areaDecisions), 'Reload must preserve decisions');
+  await click('#confirm-area-type'); assert($('#review-areas').hidden && $('#type-review').hidden, 'Last confirmation must close the type check');
+  assert(d.activeElement === $('#outline-inspector h2'), 'Completed type check must focus the Objects heading');
+  assert([...d.querySelectorAll('.layer-treatment')].every(label => !label.hidden));
+  await click('#apply-area-suggestions');
   assert(Object.keys(saved().document.areaDecisions).length === 2);
 });
 await check('Object move actions preserve identity and commit one undo step', async () => {
@@ -123,6 +140,7 @@ await check('Touch reorder commits once, while Escape and no-op drops preserve o
 });
 await check('Automatic and custom tab editing still work in the side inspector', async () => {
   await click('#edit-tabs'); assert(!$('#tab-inspector').hidden);
+  await change('#outline-picker', 'outline-0');
   await change('#tab-picker', 'auto-0'); assert(!$('#selected-tab-controls').hidden);
   await change('#selected-tab-width', '4.2'); assert(saved().document.tabLayouts['outline-0'].some(tab => tab.widthOverride === 4.2));
   await click('#undo'); assert(!Object.keys(saved().document.tabLayouts).length);
@@ -150,7 +168,7 @@ await check('Draft polygons survive step navigation and remain excluded from fin
 });
 await check('Review checks material without opening Bridges and keeps types nonblocking', async () => {
   await upload(svg('<path fill-rule="evenodd" d="M10 10H90V90H10Z M30 30H70V70H30Z"/>'));
-  await click('#review-areas'); await click('#accept-area-suggestion'); await click('[data-step="3"]');
+  await click('#review-areas'); await change('#review-treatment', 'keep'); await click('#confirm-area-type'); await click('[data-step="3"]');
   assert($('#review-support').textContent === 'Material Needs Attention', $('#review-support').textContent);
   assert(!$('#download').disabled && $('#review-issues').textContent.includes('unsupported'));
   assert($('#export-dimensions').textContent.includes('Sheet Size'));
