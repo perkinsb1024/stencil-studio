@@ -46,23 +46,23 @@ select[hidden]{display:none!important}
 .dropdown-preview{pointer-events:none}
 .dropdown-preview path{fill:#ff2da6;fill-opacity:.18;stroke:#ff2da6;stroke-width:3;stroke-linejoin:round}
 
-@font-face{font-family:'DM Sans';font-style:normal;font-weight:400;font-display:swap;src:url('/vendor/fonts/dm-sans-400.ttf') format('truetype')}
+@font-face{font-family:'DM Sans';font-style:normal;font-weight:400;font-display:swap;src:url('../vendor/fonts/dm-sans-400.ttf') format('truetype')}
 
-@font-face{font-family:'DM Sans';font-style:normal;font-weight:500;font-display:swap;src:url('/vendor/fonts/dm-sans-500.ttf') format('truetype')}
+@font-face{font-family:'DM Sans';font-style:normal;font-weight:500;font-display:swap;src:url('../vendor/fonts/dm-sans-500.ttf') format('truetype')}
 
-@font-face{font-family:'DM Sans';font-style:normal;font-weight:600;font-display:swap;src:url('/vendor/fonts/dm-sans-600.ttf') format('truetype')}
+@font-face{font-family:'DM Sans';font-style:normal;font-weight:600;font-display:swap;src:url('../vendor/fonts/dm-sans-600.ttf') format('truetype')}
 
-@font-face{font-family:'DM Sans';font-style:normal;font-weight:700;font-display:swap;src:url('/vendor/fonts/dm-sans-700.ttf') format('truetype')}
+@font-face{font-family:'DM Sans';font-style:normal;font-weight:700;font-display:swap;src:url('../vendor/fonts/dm-sans-700.ttf') format('truetype')}
 
-@font-face{font-family:'Manrope';font-style:normal;font-weight:400;font-display:swap;src:url('/vendor/fonts/manrope-400.ttf') format('truetype')}
+@font-face{font-family:'Manrope';font-style:normal;font-weight:400;font-display:swap;src:url('../vendor/fonts/manrope-400.ttf') format('truetype')}
 
-@font-face{font-family:'Manrope';font-style:normal;font-weight:500;font-display:swap;src:url('/vendor/fonts/manrope-500.ttf') format('truetype')}
+@font-face{font-family:'Manrope';font-style:normal;font-weight:500;font-display:swap;src:url('../vendor/fonts/manrope-500.ttf') format('truetype')}
 
-@font-face{font-family:'Manrope';font-style:normal;font-weight:600;font-display:swap;src:url('/vendor/fonts/manrope-600.ttf') format('truetype')}
+@font-face{font-family:'Manrope';font-style:normal;font-weight:600;font-display:swap;src:url('../vendor/fonts/manrope-600.ttf') format('truetype')}
 
-@font-face{font-family:'Manrope';font-style:normal;font-weight:700;font-display:swap;src:url('/vendor/fonts/manrope-700.ttf') format('truetype')}
+@font-face{font-family:'Manrope';font-style:normal;font-weight:700;font-display:swap;src:url('../vendor/fonts/manrope-700.ttf') format('truetype')}
 
-@font-face{font-family:'Manrope';font-style:normal;font-weight:800;font-display:swap;src:url('/vendor/fonts/manrope-800.ttf') format('truetype')}
+@font-face{font-family:'Manrope';font-style:normal;font-weight:800;font-display:swap;src:url('../vendor/fonts/manrope-800.ttf') format('truetype')}
 
 
 .pan-ready{touch-action:none;user-select:none}
